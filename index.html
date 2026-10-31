@@ -177,6 +177,10 @@
       </div>
     </section>
 
+    <section id="view-ox" class="view ox-view" hidden>
+      <iframe id="ox-frame" class="ox-frame" title="択一対策" referrerpolicy="no-referrer-when-downgrade"></iframe>
+    </section>
+
     <section id="view-speed" class="view" hidden>
       <div class="ph">
         <div class="ph-mark" aria-hidden="true">
@@ -265,95 +269,6 @@
       </div>
     </section>
 
-    <section id="view-timer" class="view timer-view" hidden>
-      <svg class="timer-waves" viewBox="0 0 400 800" preserveAspectRatio="none" aria-hidden="true">
-        <path d="M-30 210 C 70 150, 150 280, 230 210 S 340 120, 450 210" fill="none" stroke="rgba(90,160,255,0.45)" stroke-width="1.6"/>
-        <path d="M-40 250 C 80 190, 160 320, 250 250 S 360 170, 460 260" fill="none" stroke="rgba(70,140,255,0.22)" stroke-width="1.4"/>
-        <path d="M-30 560 C 90 500, 170 650, 260 560 S 370 470, 460 580" fill="none" stroke="rgba(80,150,255,0.35)" stroke-width="1.6"/>
-      </svg>
-      <h1 class="timer-title" id="timer-title">勉強時間計測</h1>
-      <div class="mode-pill" id="timer-pill">
-        <span class="mode-ico" id="timer-ico" aria-hidden="true"></span>
-        <span id="timer-mode-label">テキストまとめ</span>
-      </div>
-
-      <div id="stage-work" class="timer-stage">
-        <div class="ring-wrap" id="ring-wrap">
-          <svg class="ring" viewBox="0 0 200 200" aria-hidden="true">
-            <circle class="ring-track" cx="100" cy="100" r="86"></circle>
-            <circle id="ring-value" class="ring-value" cx="100" cy="100" r="86" transform="rotate(-90 100 100)"></circle>
-          </svg>
-          <div class="time-stack">
-            <div class="time-row">
-              <span id="time-main" class="time-main">25:00</span>
-              <span id="time-over" class="time-over" hidden>+0:00</span>
-            </div>
-          </div>
-        </div>
-        <p id="set-label" class="set-label">セット 1 / 勉強中</p>
-        <p id="work-prompt" class="work-prompt" hidden>終了してください</p>
-        <div class="timer-actions" id="work-actions">
-          <button type="button" id="btn-pause" class="tbtn tbtn-pause" aria-pressed="false">
-            <svg class="ico-pause" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="5" width="4.2" height="14" rx="1" fill="currentColor"/><rect x="13.8" y="5" width="4.2" height="14" rx="1" fill="currentColor"/></svg>
-            <svg class="ico-play" viewBox="0 0 24 24" aria-hidden="true" hidden><path fill="currentColor" d="M8 5v14l12-7z"/></svg>
-            <span id="pause-label">一時停止</span>
-          </button>
-          <button type="button" id="btn-end-study" class="tbtn tbtn-end">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1.5" fill="currentColor"/></svg>
-            <span>終了</span>
-          </button>
-        </div>
-        <div class="timer-actions" id="overtime-actions" hidden>
-          <button type="button" id="btn-break" class="tbtn tbtn-break">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M6 9.2h10.2v1.4c0 2.8-1.6 4.6-4 5.2V18H15v1.6H7.2V18h2.6v-2.2c-2.4-.6-4-2.4-4-5.2V9.2z"/><path fill="currentColor" d="M16.4 8.2h2.2c.2 1.6.8 2.6 2 3.2-.9.5-1.5 1.3-1.8 2.4h-2.2c.2-1.4.8-2.4 1.8-3.1-.8-.5-1.4-1.4-1.6-2.5h-.4z"/></svg>
-            <span>5分休憩</span>
-          </button>
-          <button type="button" id="btn-end-over" class="tbtn tbtn-end">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" d="M5 12.5 9.2 17 19 7"/></svg>
-            <span>終了</span>
-          </button>
-        </div>
-      </div>
-
-      <div id="stage-break" class="timer-stage" hidden>
-        <div class="break-badge" aria-hidden="true">
-          <svg viewBox="0 0 48 48">
-            <path fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" d="M18 13.5c.7-1.6 1.5-1.6 2.2 0M24 12.2c.7-1.6 1.5-1.6 2.2 0"/>
-            <path fill="none" stroke="currentColor" stroke-width="2.3" stroke-linejoin="round" d="M15 18.5h16.5v2.2c0 5.6-3.4 9.4-8.2 9.4s-8.3-3.8-8.3-9.4v-2.2z"/>
-            <path fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" d="M31.5 21h2.4c2.2 0 3.8 1.5 3.8 3.5S36.1 28 33.9 28H31.5"/>
-          </svg>
-        </div>
-        <p class="break-heading">休憩中</p>
-        <p id="break-time" class="time-main">05:00</p>
-        <p class="break-note">勉強計測は停止中</p>
-        <button type="button" id="btn-end-break" class="tbtn tbtn-end tbtn-wide">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1.5" fill="currentColor"/></svg>
-          <span>終了</span>
-        </button>
-      </div>
-
-      <div id="stage-ask" class="timer-stage" hidden>
-        <p id="break-over" class="break-over" hidden>休憩超過 +0:00</p>
-        <p id="ask-time" class="time-main">00:00</p>
-        <p id="ask-prompt" class="ask-prompt">次のセットを始めますか？</p>
-        <div class="timer-actions">
-          <button type="button" id="btn-next-yes" class="tbtn tbtn-break">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M8 5v14l12-7z"/></svg>
-            <span>はい</span>
-          </button>
-          <button type="button" id="btn-next-no" class="tbtn tbtn-end">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" d="M7 7l10 10M17 7 7 17"/></svg>
-            <span>いいえ</span>
-          </button>
-        </div>
-        <p class="ask-foot">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M8 5v14l12-7z"/></svg>
-          <span id="ask-foot-label">再開すると同じセット（テキストまとめ）を続行</span>
-        </p>
-      </div>
-      <p id="timer-live" class="sr-only" aria-live="polite"></p>
-    </section>
-
     <section id="view-settings" class="view" hidden>
       <header class="subhead"><h1>設定</h1></header>
       <p class="lead">試験日と目標は、この端末に保存されます。</p>
@@ -381,6 +296,51 @@
       </section>
     </section>
   </div>
+
+  <p id="measure-badge" class="measure-badge" hidden><span>計測中</span> <b id="measure-clock">25:00</b></p>
+  <div id="pom-overlay" class="pom-overlay" hidden>
+    <div id="pom-over" class="pom-card" hidden>
+      <p id="work-prompt" class="pom-prompt">終了してください</p>
+      <div class="timer-actions">
+        <button type="button" id="btn-break" class="tbtn tbtn-break">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M6 9.2h10.2v1.4c0 2.8-1.6 4.6-4 5.2V18H15v1.6H7.2V18h2.6v-2.2c-2.4-.6-4-2.4-4-5.2V9.2z"/><path fill="currentColor" d="M16.4 8.2h2.2c.2 1.6.8 2.6 2 3.2-.9.5-1.5 1.3-1.8 2.4h-2.2c.2-1.4.8-2.4 1.8-3.1-.8-.5-1.4-1.4-1.6-2.5h-.4z"/></svg>
+          <span>5分休憩</span>
+        </button>
+        <button type="button" id="btn-end-over" class="tbtn tbtn-end">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" d="M5 12.5 9.2 17 19 7"/></svg>
+          <span>終了</span>
+        </button>
+      </div>
+    </div>
+    <div id="pom-break" class="pom-card" hidden>
+      <p class="break-heading">休憩中</p>
+      <p id="break-time" class="break-time">05:00</p>
+      <p class="break-note">勉強計測は停止中</p>
+      <button type="button" id="btn-end-break" class="tbtn tbtn-end tbtn-wide">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1.5" fill="currentColor"/></svg>
+        <span>終了</span>
+      </button>
+    </div>
+    <div id="pom-ask" class="pom-card" hidden>
+      <p id="break-over" class="break-over" hidden>休憩超過 +0:00</p>
+      <p id="ask-prompt" class="ask-prompt">次のセットを始めますか？</p>
+      <div class="timer-actions">
+        <button type="button" id="btn-next-yes" class="tbtn tbtn-break">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M8 5v14l12-7z"/></svg>
+          <span>はい</span>
+        </button>
+        <button type="button" id="btn-next-no" class="tbtn tbtn-end">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" d="M7 7l10 10M17 7 7 17"/></svg>
+          <span>いいえ</span>
+        </button>
+      </div>
+      <p class="ask-foot">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M8 5v14l12-7z"/></svg>
+        <span id="ask-foot-label">再開すると同じセット（テキストまとめ）を続行</span>
+      </p>
+    </div>
+  </div>
+  <p id="timer-live" class="sr-only" aria-live="polite"></p>
 
   <nav class="tabbar" aria-label="メインタブ">
     <a class="tab" href="#home" data-tab="home">

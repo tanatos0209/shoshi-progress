@@ -1,4 +1,4 @@
-const CACHE = "shoshi-progress-v2";
+const CACHE = "shoshi-progress-v3";
 const SHELL = [
   "./",
   "./index.html",

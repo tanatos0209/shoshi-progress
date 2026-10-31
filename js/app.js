@@ -14,7 +14,6 @@ const {
   addStudySpan,
   createSession,
   tickSession,
-  pauseSession,
   resumeSession,
   startBreak,
   confirmNextSet,
@@ -29,20 +28,20 @@ const DAY_LABELS = ["月", "火", "水", "木", "金", "土", "日"];
 const DEMO_HOURS = [1.5, 2.0, 1.0, 2.5, 1.5, 3.0, 2.8];
 const DEMO_GOLD = [false, false, false, true, false, true, false];
 
-const MODE_ICONS = {
-  notes: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M6 3.5h8.2L19 8.2V20.5H6V3.5zm7.2 1.5V9H18"/></svg>',
-  ox: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" d="M5 12.2 9.2 16.5 19 7"/></svg>',
-  speed: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M13.2 2.5 6 13.2h4.2L9.4 21.5 18 10.2h-4.4z"/></svg>'
-};
-
 const stateBox = { data: null };
 let session = null;
 let ticker = 0;
 let lastFlush = 0;
 let pendingEntrance = null;
+let pendingLeave = null;
 let endConfirmOpen = false;
 let hashGuard = false;
 let lastScreen = "";
+
+function studyView(mode) {
+  if (mode === "notes" || mode === "speed" || mode === "ox") return mode;
+  return "home";
+}
 
 function formatDuration(min) {
   const value = Math.max(0, Math.round(Number(min) || 0));
@@ -299,23 +298,24 @@ function paintSubject(key, subject) {
 
 function currentView() {
   const hash = (location.hash || "#home").replace("#", "");
-  const known = ["home", "notes", "speed", "record", "perfect", "calendar", "settings", "timer"];
+  const known = ["home", "notes", "ox", "speed", "record", "perfect", "calendar", "settings"];
   return known.includes(hash) ? hash : "home";
 }
 
-function show(view) {
-  if (session) view = "timer";
-  else if (view === "timer") view = "home";
+function ensureOxFrame() {
+  const frame = $("ox-frame");
+  if (!frame.getAttribute("src")) frame.src = OX_URL;
+}
 
+function show(view) {
   document.querySelectorAll(".view").forEach((node) => {
     node.hidden = node.id !== "view-" + view;
   });
-  const timing = view === "timer";
-  document.body.classList.toggle("is-timing", timing);
-  const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.setAttribute("content", timing ? "#050814" : "#03150f");
+  document.body.classList.toggle("is-ox", view === "ox");
+  document.body.classList.remove("is-timing");
+  if (view === "ox") ensureOxFrame();
 
-  const tab = view === "notes" || view === "speed" || view === "timer" ? "home" : view;
+  const tab = view === "notes" || view === "speed" || view === "ox" ? "home" : view;
   document.querySelectorAll(".tab").forEach((node) => {
     const on = node.dataset.tab === tab;
     node.classList.toggle("active", on);
@@ -330,13 +330,14 @@ function show(view) {
     perfect: "パーフェクトコントロール",
     calendar: "カレンダー",
     settings: "設定",
-    timer: "勉強時間計測"
+    ox: "択一対策"
   };
   document.title = view === "home" ? "進捗管理" : titles[view] + " | 進捗管理";
   if (view === "record") fillRecord();
   if (view === "settings") fillSettings();
-  if (view === "timer" && session) renderTimer(presentSession(session, Date.now()));
-  else renderHome();
+  renderHome();
+  if (session && view === studyView(session.mode)) renderStudyChrome(presentSession(session, Date.now()));
+  else hideStudyChrome();
   window.scrollTo(0, 0);
 }
 
@@ -423,38 +424,25 @@ function saveSettings() {
   toast("設定を保存しました");
 }
 
-function renderTimer(view) {
-  const work = view.screen === "work" || view.screen === "workDone";
-  $("timer-title").hidden = !work;
-  $("timer-pill").hidden = !work;
-  $("stage-work").hidden = !work;
-  $("stage-break").hidden = view.screen !== "break";
-  $("stage-ask").hidden = view.screen !== "breakDone";
-  $("timer-mode-label").textContent = view.modeLabel;
-  if (session) $("timer-ico").innerHTML = MODE_ICONS[session.mode] || "";
+function hideStudyChrome() {
+  $("measure-badge").hidden = true;
+  $("pom-overlay").hidden = true;
+}
 
-  if (work) {
-    $("time-main").textContent = view.clock;
-    $("time-over").hidden = !view.overtime;
-    if (view.overtime) $("time-over").textContent = view.overtime;
-    $("set-label").hidden = !view.setLabel;
-    if (view.setLabel) $("set-label").textContent = view.setLabel;
-    $("work-prompt").hidden = !view.prompt;
-    $("work-actions").hidden = view.screen !== "work";
-    $("overtime-actions").hidden = view.screen !== "workDone";
-    $("ring-wrap").classList.toggle("is-over", !!view.overtimeMode);
-    $("pause-label").textContent = view.paused ? "再開" : "一時停止";
-    $("btn-pause").setAttribute("aria-pressed", view.paused ? "true" : "false");
-    $("btn-pause").querySelector(".ico-pause").hidden = view.paused;
-    $("btn-pause").querySelector(".ico-play").hidden = !view.paused;
-    const ring = $("ring-value");
-    const length = 2 * Math.PI * 86;
-    ring.style.strokeDasharray = String(length);
-    ring.style.strokeDashoffset = String(length * (1 - view.ring));
-  } else if (view.screen === "break") {
-    $("break-time").textContent = view.clock;
-  } else {
-    $("ask-time").textContent = view.clock;
+function renderStudyChrome(view) {
+  const counting = view.screen === "work" || view.screen === "workDone";
+  $("measure-badge").hidden = !counting;
+  if (counting) $("measure-clock").textContent = view.clock;
+
+  const showOver = view.screen === "workDone";
+  const showBreak = view.screen === "break";
+  const showAsk = view.screen === "breakDone";
+  $("pom-overlay").hidden = !(showOver || showBreak || showAsk);
+  $("pom-over").hidden = !showOver;
+  $("pom-break").hidden = !showBreak;
+  $("pom-ask").hidden = !showAsk;
+  if (showBreak) $("break-time").textContent = view.clock;
+  if (showAsk) {
     $("break-over").hidden = !view.breakOver;
     if (view.breakOver) $("break-over").textContent = view.breakOver;
     $("ask-foot-label").textContent = view.footer;
@@ -462,7 +450,7 @@ function renderTimer(view) {
 
   if (view.screen !== lastScreen) {
     const messages = {
-      work: view.paused ? "一時停止中" : view.setLabel,
+      work: "計測中 " + view.clock,
       workDone: "終了してください",
       break: "休憩中。勉強計測は停止中",
       breakDone: "次のセットを始めますか？"
@@ -519,9 +507,9 @@ function startTicker() {
       session = { ...session, seenNudge: view.nudge };
       stateBox.data.activeSession = session;
       save(stateBox.data);
-      pulse(view.screen === "workDone" ? $("work-prompt") : $("ask-prompt"));
+      pulse(view.screen === "workDone" ? $("pom-over") : $("pom-ask"));
     }
-    renderTimer(view);
+    if (currentView() === studyView(session.mode)) renderStudyChrome(view);
     if (now - lastFlush >= 5000) {
       flushSession(now, false);
       lastFlush = now;
@@ -536,13 +524,14 @@ function stopTicker() {
   ticker = 0;
 }
 
-function enterTimer() {
-  if (location.hash !== "#timer") {
+function enterStudy(mode) {
+  const view = studyView(mode);
+  if (location.hash !== "#" + view) {
     hashGuard = true;
-    location.hash = "#timer";
+    location.hash = "#" + view;
     hashGuard = false;
   }
-  show("timer");
+  show(view);
   startTicker();
 }
 
@@ -567,12 +556,11 @@ function beginFromConfirm() {
   lastScreen = "";
   stateBox.data.activeSession = session;
   save(stateBox.data);
-  enterTimer();
+  enterStudy(mode);
 }
 
 function openEndConfirm() {
   if (!session || endConfirmOpen) return;
-  if (session.phase !== "work" && session.phase !== "paused" && session.phase !== "workDone") return;
   endConfirmOpen = true;
   $("end-sheet").hidden = false;
   $("end-no").focus();
@@ -580,42 +568,40 @@ function openEndConfirm() {
 
 function closeEndConfirm() {
   endConfirmOpen = false;
+  pendingLeave = null;
   $("end-sheet").hidden = true;
 }
 
 function finishSession() {
   if (!session) return;
-  const mode = session.mode;
+  const dest = pendingLeave || "home";
+  pendingLeave = null;
   stopTicker();
   flushSession(Date.now(), true);
   session = null;
   lastScreen = "";
   closeEndConfirm();
-  document.body.classList.remove("is-timing");
-  const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.setAttribute("content", "#03150f");
-  if (mode === "ox") {
-    location.assign(OX_URL);
-    return;
-  }
+  hideStudyChrome();
   hashGuard = true;
-  location.hash = "#home";
+  location.hash = "#" + dest;
   hashGuard = false;
-  show("home");
+  show(dest);
   toast("学習時間を記録しました");
 }
 
 function bind() {
   window.addEventListener("hashchange", () => {
     if (hashGuard) return;
-    if (session && currentView() !== "timer") {
+    const view = currentView();
+    if (session && view !== studyView(session.mode)) {
+      pendingLeave = view;
       openEndConfirm();
       hashGuard = true;
-      location.hash = "#timer";
+      location.hash = "#" + studyView(session.mode);
       hashGuard = false;
       return;
     }
-    show(currentView());
+    show(view);
   });
 
   document.querySelectorAll("[data-entrance]").forEach((button) => {
@@ -628,23 +614,17 @@ function bind() {
     if (event.target === $("start-sheet")) closeStart();
   });
 
-  $("btn-pause").addEventListener("click", () => {
-    if (!session) return;
-    const now = Date.now();
-    if (session.phase === "paused") session = resumeSession(session, now);
-    else session = pauseSession(session, now);
-    flushSession(now, false);
-    renderTimer(presentSession(session, now));
+  $("btn-end-over").addEventListener("click", () => {
+    pendingLeave = null;
+    openEndConfirm();
   });
-  $("btn-end-study").addEventListener("click", openEndConfirm);
-  $("btn-end-over").addEventListener("click", openEndConfirm);
   $("btn-break").addEventListener("click", () => {
     if (!session) return;
     const now = Date.now();
     session = tickSession(session, now);
     session = startBreak(session, now);
     flushSession(now, false);
-    renderTimer(presentSession(session, now));
+    renderStudyChrome(presentSession(session, now));
   });
   $("btn-end-break").addEventListener("click", finishSession);
   $("btn-next-yes").addEventListener("click", () => {
@@ -652,7 +632,7 @@ function bind() {
     const now = Date.now();
     session = confirmNextSet(session, now);
     flushSession(now, false);
-    renderTimer(presentSession(session, now));
+    renderStudyChrome(presentSession(session, now));
   });
   $("btn-next-no").addEventListener("click", finishSession);
 
@@ -710,7 +690,9 @@ function bind() {
     if (!confirm("表示を初期のデモデータに戻しますか？")) return;
     stopTicker();
     session = null;
+    pendingLeave = null;
     closeEndConfirm();
+    hideStudyChrome();
     stateBox.data = seed();
     save(stateBox.data);
     fillSettings();
@@ -739,9 +721,10 @@ function boot() {
   session = stateBox.data.activeSession;
   if (session) {
     const now = Date.now();
+    if (session.phase === "paused") session = resumeSession(session, now);
     session = tickSession(session, now);
     flushSession(now, false);
-    enterTimer();
+    enterStudy(session.mode);
   } else {
     if (!location.hash) location.hash = "#home";
     show(currentView());

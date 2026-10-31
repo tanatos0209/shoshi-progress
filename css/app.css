@@ -1121,3 +1121,116 @@ body.is-timing .content {
     animation: none;
   }
 }
+
+body.is-ox .content {
+  padding: 0 0 calc(74px + env(safe-area-inset-bottom));
+}
+
+.ox-frame {
+  display: block;
+  width: 100%;
+  height: calc(100dvh - 74px - env(safe-area-inset-bottom));
+  border: 0;
+  background: #121418;
+}
+
+.measure-badge {
+  position: fixed;
+  z-index: 32;
+  top: calc(10px + env(safe-area-inset-top));
+  right: max(12px, calc((100vw - min(480px, 100vw)) / 2 + 12px));
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  margin: 0;
+  padding: 0 11px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #3aa2ff 0%, #0b6ef0 100%);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  line-height: 1;
+  box-shadow: 0 4px 14px rgba(11, 110, 240, 0.4);
+  pointer-events: none;
+}
+
+.measure-badge b {
+  font-weight: 900;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+body.is-ox .measure-badge {
+  top: calc(58px + env(safe-area-inset-top));
+}
+
+.pom-overlay {
+  position: fixed;
+  z-index: 25;
+  left: 50%;
+  width: min(480px, 100%);
+  transform: translateX(-50%);
+  top: 0;
+  bottom: calc(72px + env(safe-area-inset-bottom));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 22px 16px;
+  background: rgba(2, 8, 18, 0.58);
+}
+
+.pom-card {
+  width: min(400px, 100%);
+  padding: 22px 16px 16px;
+  border-radius: 22px;
+  background:
+    radial-gradient(90% 70% at 50% 0%, rgba(48, 110, 210, 0.32), transparent 58%),
+    #0c1528;
+  border: 1px solid rgba(150, 190, 255, 0.28);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
+  color: #f5f8ff;
+  text-align: center;
+}
+
+.pom-prompt {
+  margin: 4px 0 18px;
+  font-size: 22px;
+  font-weight: 900;
+}
+
+.pom-card .timer-actions {
+  margin-top: 0;
+  padding-top: 0;
+}
+
+.pom-card .break-heading {
+  margin: 0;
+  font-size: 22px;
+}
+
+.break-time {
+  margin: 8px 0 4px;
+  font-size: clamp(52px, 14vw, 68px);
+  font-weight: 900;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.pom-card .break-note {
+  margin: 0 0 16px;
+}
+
+.pom-card .break-over {
+  margin: 0 0 8px;
+}
+
+.pom-card .ask-prompt {
+  margin: 0 0 16px;
+}
+
+.pom-card .ask-foot {
+  margin: 12px 0 0;
+}
