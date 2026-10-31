@@ -40,50 +40,53 @@
         <h1>進捗管理</h1>
       </header>
 
-      <section class="card hero" aria-label="試験までの日数">
+      <section class="card hero" id="exam-hero" aria-label="本試験">
         <div class="hero-top">
-          <div>
-            <p class="until">
-              <span class="until-label">本試験まで</span>
-              <strong id="days-left" class="gold-text">150</strong><em class="gold-text">日</em>
+          <div class="exam-block">
+            <p class="exam-line">
+              <span class="exam-kicker gold-text">本試験</span>
+              <span id="exam-when" class="exam-when gold-text">2027年7月4日</span>
             </p>
-            <p id="past-note" class="past-note" hidden>試験日を過ぎています。設定から日付を変えられます。</p>
+            <p class="until">
+              <span class="until-label gold-text">あと</span>
+              <strong id="days-left" class="gold-text">245</strong><em class="gold-text">日</em>
+            </p>
             <p class="today-line">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
                 <circle cx="12" cy="12" r="8"/>
                 <path d="M12 8v4.5l3 2" stroke-linecap="round"/>
               </svg>
-              <span>今日 <b id="today-time" class="gold-text">2時間45分</b><span class="goal">（目標 <span id="daily-goal">3時間</span>）</span></span>
+              <span>今日 <b id="today-time" class="gold-text">0時間0分</b><span class="goal">（目標 <span id="daily-goal">3時間</span>）</span></span>
             </p>
           </div>
           <div class="streak" aria-label="連続日数">
             <span>連続</span>
-            <strong><b id="streak-n">1</b>日</strong>
+            <strong><b id="streak-n">0</b>日</strong>
           </div>
         </div>
         <nav class="tiles" aria-label="学習メニュー">
-          <a class="tile" href="#notes">
+          <button type="button" class="tile" data-entrance="notes">
             <svg viewBox="0 0 48 48" aria-hidden="true">
               <path fill="#F0D078" d="M23.4 13.2c-4.4-2.5-9.6-3.6-15.2-2.2-.5.1-1 .6-1 1.2v20.6c0 .7.6 1.2 1.3 1.1 5.6-1.2 10.2-.2 14.9 2.4V13.2z"/>
               <path fill="#E2B84C" d="M24.6 13.2c4.4-2.5 9.6-3.6 15.2-2.2.5.1 1 .6 1 1.2v20.6c0 .7-.6 1.2-1.3 1.1-5.6-1.2-10.2-.2-14.9 2.4V13.2z"/>
               <path fill="#fff6d4" d="M22.7 14.4h2.6V35h-2.6z"/>
             </svg>
             <span>テキストまとめ</span>
-          </a>
-          <a class="tile" data-external="ox" href="https://tanatos0209.github.io/shoshi-ox/">
+          </button>
+          <button type="button" class="tile" data-entrance="ox">
             <svg viewBox="0 0 48 48" aria-hidden="true">
               <rect x="7" y="7" width="34" height="34" rx="9" fill="none" stroke="#F0D078" stroke-width="2.6"/>
               <path d="M14.5 25.2 20.8 32 34 17.2" fill="none" stroke="#F0D078" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
             <span>択一対策</span>
-          </a>
-          <a class="tile" href="#speed">
+          </button>
+          <button type="button" class="tile" data-entrance="speed">
             <svg viewBox="0 0 48 48" aria-hidden="true">
               <rect x="14" y="4.5" width="20" height="39" rx="4" fill="none" stroke="#F0D078" stroke-width="2.4"/>
               <path fill="#F0D078" d="M26.4 13.2 19.6 24.4h4.6L21.4 35l9.2-13.6h-4.8z"/>
             </svg>
             <span>スピードチェック</span>
-          </a>
+          </button>
         </nav>
       </section>
 
@@ -262,13 +265,103 @@
       </div>
     </section>
 
+    <section id="view-timer" class="view timer-view" hidden>
+      <svg class="timer-waves" viewBox="0 0 400 800" preserveAspectRatio="none" aria-hidden="true">
+        <path d="M-30 210 C 70 150, 150 280, 230 210 S 340 120, 450 210" fill="none" stroke="rgba(90,160,255,0.45)" stroke-width="1.6"/>
+        <path d="M-40 250 C 80 190, 160 320, 250 250 S 360 170, 460 260" fill="none" stroke="rgba(70,140,255,0.22)" stroke-width="1.4"/>
+        <path d="M-30 560 C 90 500, 170 650, 260 560 S 370 470, 460 580" fill="none" stroke="rgba(80,150,255,0.35)" stroke-width="1.6"/>
+      </svg>
+      <h1 class="timer-title" id="timer-title">勉強時間計測</h1>
+      <div class="mode-pill" id="timer-pill">
+        <span class="mode-ico" id="timer-ico" aria-hidden="true"></span>
+        <span id="timer-mode-label">テキストまとめ</span>
+      </div>
+
+      <div id="stage-work" class="timer-stage">
+        <div class="ring-wrap" id="ring-wrap">
+          <svg class="ring" viewBox="0 0 200 200" aria-hidden="true">
+            <circle class="ring-track" cx="100" cy="100" r="86"></circle>
+            <circle id="ring-value" class="ring-value" cx="100" cy="100" r="86" transform="rotate(-90 100 100)"></circle>
+          </svg>
+          <div class="time-stack">
+            <div class="time-row">
+              <span id="time-main" class="time-main">25:00</span>
+              <span id="time-over" class="time-over" hidden>+0:00</span>
+            </div>
+          </div>
+        </div>
+        <p id="set-label" class="set-label">セット 1 / 勉強中</p>
+        <p id="work-prompt" class="work-prompt" hidden>終了してください</p>
+        <div class="timer-actions" id="work-actions">
+          <button type="button" id="btn-pause" class="tbtn tbtn-pause" aria-pressed="false">
+            <svg class="ico-pause" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="5" width="4.2" height="14" rx="1" fill="currentColor"/><rect x="13.8" y="5" width="4.2" height="14" rx="1" fill="currentColor"/></svg>
+            <svg class="ico-play" viewBox="0 0 24 24" aria-hidden="true" hidden><path fill="currentColor" d="M8 5v14l12-7z"/></svg>
+            <span id="pause-label">一時停止</span>
+          </button>
+          <button type="button" id="btn-end-study" class="tbtn tbtn-end">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1.5" fill="currentColor"/></svg>
+            <span>終了</span>
+          </button>
+        </div>
+        <div class="timer-actions" id="overtime-actions" hidden>
+          <button type="button" id="btn-break" class="tbtn tbtn-break">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M6 9.2h10.2v1.4c0 2.8-1.6 4.6-4 5.2V18H15v1.6H7.2V18h2.6v-2.2c-2.4-.6-4-2.4-4-5.2V9.2z"/><path fill="currentColor" d="M16.4 8.2h2.2c.2 1.6.8 2.6 2 3.2-.9.5-1.5 1.3-1.8 2.4h-2.2c.2-1.4.8-2.4 1.8-3.1-.8-.5-1.4-1.4-1.6-2.5h-.4z"/></svg>
+            <span>5分休憩</span>
+          </button>
+          <button type="button" id="btn-end-over" class="tbtn tbtn-end">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" d="M5 12.5 9.2 17 19 7"/></svg>
+            <span>終了</span>
+          </button>
+        </div>
+      </div>
+
+      <div id="stage-break" class="timer-stage" hidden>
+        <div class="break-badge" aria-hidden="true">
+          <svg viewBox="0 0 48 48">
+            <path fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" d="M18 13.5c.7-1.6 1.5-1.6 2.2 0M24 12.2c.7-1.6 1.5-1.6 2.2 0"/>
+            <path fill="none" stroke="currentColor" stroke-width="2.3" stroke-linejoin="round" d="M15 18.5h16.5v2.2c0 5.6-3.4 9.4-8.2 9.4s-8.3-3.8-8.3-9.4v-2.2z"/>
+            <path fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" d="M31.5 21h2.4c2.2 0 3.8 1.5 3.8 3.5S36.1 28 33.9 28H31.5"/>
+          </svg>
+        </div>
+        <p class="break-heading">休憩中</p>
+        <p id="break-time" class="time-main">05:00</p>
+        <p class="break-note">勉強計測は停止中</p>
+        <button type="button" id="btn-end-break" class="tbtn tbtn-end tbtn-wide">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1.5" fill="currentColor"/></svg>
+          <span>終了</span>
+        </button>
+      </div>
+
+      <div id="stage-ask" class="timer-stage" hidden>
+        <p id="break-over" class="break-over" hidden>休憩超過 +0:00</p>
+        <p id="ask-time" class="time-main">00:00</p>
+        <p id="ask-prompt" class="ask-prompt">次のセットを始めますか？</p>
+        <div class="timer-actions">
+          <button type="button" id="btn-next-yes" class="tbtn tbtn-break">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M8 5v14l12-7z"/></svg>
+            <span>はい</span>
+          </button>
+          <button type="button" id="btn-next-no" class="tbtn tbtn-end">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" d="M7 7l10 10M17 7 7 17"/></svg>
+            <span>いいえ</span>
+          </button>
+        </div>
+        <p class="ask-foot">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M8 5v14l12-7z"/></svg>
+          <span id="ask-foot-label">再開すると同じセット（テキストまとめ）を続行</span>
+        </p>
+      </div>
+      <p id="timer-live" class="sr-only" aria-live="polite"></p>
+    </section>
+
     <section id="view-settings" class="view" hidden>
       <header class="subhead"><h1>設定</h1></header>
       <p class="lead">試験日と目標は、この端末に保存されます。</p>
       <section class="card">
         <div class="field">
-          <label for="exam-date">試験日</label>
-          <input id="exam-date" type="date"/>
+          <span class="block-label" id="exam-fixed-label">試験日</span>
+          <p class="exam-fixed" id="exam-fixed" aria-labelledby="exam-fixed-label">2027年7月4日（日）</p>
+          <p class="hint">7月最初の日曜日です。試験当日はあと0日、その翌日に次の年へ移ります。</p>
         </div>
         <div class="field">
           <label for="daily-hours">1日の目標時間</label>
@@ -284,7 +377,7 @@
         </div>
         <button type="button" class="btn-gold" id="save-settings">保存する</button>
         <button type="button" class="btn-quiet" id="reset-demo">デモ表示に戻す</button>
-        <p class="hint">初期状態は、本試験まで150日・今日2時間45分・連続1日・今週のグラフは見本の時間です。時間を記録すると、グラフは実際の記録に切り替わります。</p>
+        <p class="hint">連続日数は、その日の学習時間が30分以上になったときだけ増えます。アプリを開いただけでは増えません。今週のグラフは、記録するまでは見本です。時間を記録すると、実際の記録に切り替わります。</p>
       </section>
     </section>
   </div>
@@ -333,6 +426,26 @@
   </nav>
 </div>
 <div id="toast" role="status" aria-live="polite"></div>
+<div id="start-sheet" class="sheet" hidden>
+  <div class="sheet-card" role="dialog" aria-modal="true" aria-labelledby="start-title">
+    <h2 id="start-title">学習を始めますか？</h2>
+    <p class="sheet-mode" id="start-mode">テキストまとめ</p>
+    <div class="sheet-actions">
+      <button type="button" id="start-yes" class="tbtn tbtn-gold">はい</button>
+      <button type="button" id="start-no" class="tbtn tbtn-ghost">いいえ</button>
+    </div>
+  </div>
+</div>
+<div id="end-sheet" class="sheet" hidden>
+  <div class="sheet-card sheet-neon" role="dialog" aria-modal="true" aria-labelledby="end-title">
+    <h2 id="end-title">終了して記録しますか？</h2>
+    <div class="sheet-actions">
+      <button type="button" id="end-yes" class="tbtn tbtn-end">はい</button>
+      <button type="button" id="end-no" class="tbtn tbtn-pause">いいえ</button>
+    </div>
+  </div>
+</div>
+<script src="js/rules.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>
