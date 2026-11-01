@@ -44,15 +44,18 @@ function studyView(mode) {
   return "home";
 }
 
+const DAILY_GOAL_MINUTES = 240;
+
 function formatDuration(min) {
-  const value = Math.max(0, Math.round(Number(min) || 0));
+  const value = Math.max(0, Math.floor(Number(min) || 0));
   return `${Math.floor(value / 60)}時間${value % 60}分`;
 }
 
-function formatGoalHours(minutes) {
-  const value = Math.max(0, Math.round(Number(minutes) || 0));
-  if (value % 60 === 0) return `${value / 60}時間`;
-  return formatDuration(value);
+/* Display only. Stored minutes and carryMs stay exact. */
+function floorStudyMinutes(rec) {
+  const minutes = Math.max(0, Number(rec && rec.minutes) || 0);
+  const carryMs = Math.max(0, Number(rec && rec.carryMs) || 0);
+  return Math.floor((minutes * 60000 + carryMs) / 60000);
 }
 
 function clamp(n, min, max) {
@@ -64,7 +67,7 @@ function seed() {
   return {
     v: 1,
     examDate: computeExamDate(today),
-    dailyGoalMinutes: 180,
+    dailyGoalMinutes: DAILY_GOAL_MINUTES,
     weeklyGoalHours: 30,
     dailyQuestionGoal: 20,
     streak: 0,
@@ -105,6 +108,7 @@ function normalize(data) {
 function settle(data) {
   const today = tokyoToday();
   data.examDate = computeExamDate(today);
+  data.dailyGoalMinutes = DAILY_GOAL_MINUTES;
   if (data.demo && !data.studied && !data.activeSession) {
     data.log = {
       [today]: { minutes: 0, questions: 0, carryMs: 0 }
@@ -219,8 +223,9 @@ function renderHome() {
   $("exam-hero").setAttribute("aria-label", summary.label);
 
   const rec = todayRecord(data);
-  $("today-time").textContent = formatDuration(rec.minutes);
-  $("daily-goal").textContent = formatGoalHours(data.dailyGoalMinutes);
+  const todayLog = data.log[today] || { minutes: rec.minutes, carryMs: 0 };
+  $("today-time").textContent = formatDuration(floorStudyMinutes(todayLog));
+  $("daily-goal").textContent = "4時間";
   $("streak-n").textContent = String(Math.max(0, data.streak));
   $("week-goal").textContent = String(data.weeklyGoalHours);
 
@@ -422,7 +427,7 @@ function fillRecord() {
   const data = stateBox.data;
   const rec = todayRecord(data);
   $("record-date").textContent = formatJPDate(tokyoToday());
-  $("record-now").textContent = formatDuration(rec.minutes);
+  $("record-now").textContent = formatDuration(floorStudyMinutes(data.log[tokyoToday()] || rec));
   $("record-questions").textContent = String(rec.questions);
   $("q-input").value = String(rec.questions);
   $("add-minutes").value = "";
@@ -439,7 +444,6 @@ function fillRecord() {
 function fillSettings() {
   const data = stateBox.data;
   $("exam-fixed").textContent = formatJPDate(computeExamDate(tokyoToday()));
-  $("daily-hours").value = String(Math.round((data.dailyGoalMinutes / 60) * 10) / 10);
   $("weekly-hours").value = String(data.weeklyGoalHours);
   $("daily-questions").value = String(data.dailyQuestionGoal);
 }
@@ -488,11 +492,10 @@ function toast(message) {
 
 function saveSettings() {
   const data = stateBox.data;
-  const hours = clamp(Number($("daily-hours").value) || 0, 0.5, 24);
   const week = clamp(Math.round(Number($("weekly-hours").value) || 0), 1, 168);
   const questions = clamp(Math.round(Number($("daily-questions").value) || 0), 1, 500);
   data.examDate = computeExamDate(tokyoToday());
-  data.dailyGoalMinutes = Math.round(hours * 60);
+  data.dailyGoalMinutes = DAILY_GOAL_MINUTES;
   data.weeklyGoalHours = week;
   data.dailyQuestionGoal = questions;
   save(data);

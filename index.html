@@ -17,7 +17,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&display=swap" rel="stylesheet"/>
-<link rel="stylesheet" href="css/app.css?v=5"/>
+<link rel="stylesheet" href="css/app.css?v=6"/>
 <style>html,body{background:#03150f}</style>
 </head>
 <body>
@@ -56,7 +56,7 @@
                 <circle cx="12" cy="12" r="8"/>
                 <path d="M12 8v4.5l3 2" stroke-linecap="round"/>
               </svg>
-              <span>今日 <b id="today-time" class="gold-text">0時間0分</b><span class="goal">（目標 <span id="daily-goal">3時間</span>）</span></span>
+              <span>今日 <b id="today-time" class="gold-text">0時間0分</b><span class="goal">（目標 <span id="daily-goal">4時間</span>）</span></span>
             </p>
           </div>
           <div class="streak" aria-label="連続日数">
@@ -283,8 +283,9 @@
           <p class="hint">7月最初の日曜日です。試験当日はあと0日、その翌日に次の年へ移ります。</p>
         </div>
         <div class="field">
-          <label for="daily-hours">1日の目標時間</label>
-          <input id="daily-hours" type="number" inputmode="decimal" min="0.5" max="24" step="0.5"/>
+          <span class="block-label">1日の目標時間</span>
+          <p class="exam-fixed">4時間</p>
+          <p class="hint">1日の勉強時間の目標は4時間で固定です。</p>
         </div>
         <div class="field">
           <label for="weekly-hours">週の目標時間</label>
@@ -409,7 +410,7 @@
     </div>
   </div>
 </div>
-<script src="js/rules.js?v=5"></script>
-<script src="js/app.js?v=5"></script>
+<script src="js/rules.js?v=6"></script>
+<script src="js/app.js?v=6"></script>
 </body>
 </html>
