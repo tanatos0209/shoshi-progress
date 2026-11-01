@@ -54,6 +54,51 @@ let guideHold = null;
 let pickedRate = "";
 let cloze = { key: "", total: 0, open: new Set() };
 let speedUi = { level: "chapters", chapterId: "", topicId: "", qIndex: 0, feedback: null };
+let textPanel = "read";
+let aiSlots = null;
+const AI_KEY = "shoshi-progress-ai-v1";
+const AI_SLOT_COUNT = 20;
+
+function cleanAiImage(value) {
+  if (typeof value !== "string" || value.indexOf("data:image/") !== 0) return "";
+  return value;
+}
+
+function normalizeAiSlots(raw) {
+  const list = Array.isArray(raw) ? raw : [];
+  const slots = [];
+  for (let i = 0; i < AI_SLOT_COUNT; i += 1) {
+    const item = list[i] && typeof list[i] === "object" ? list[i] : {};
+    slots.push({
+      image: cleanAiImage(item.image),
+      text: typeof item.text === "string" ? item.text : ""
+    });
+  }
+  return slots;
+}
+
+function loadAiSlots() {
+  try {
+    return normalizeAiSlots(JSON.parse(localStorage.getItem(AI_KEY) || "null"));
+  } catch (err) {
+    return normalizeAiSlots(null);
+  }
+}
+
+function saveAiSlots(slots) {
+  aiSlots = normalizeAiSlots(slots);
+  try {
+    localStorage.setItem(AI_KEY, JSON.stringify(aiSlots));
+    return true;
+  } catch (err) {
+    return false;
+  }
+}
+
+function ensureAiSlots() {
+  if (!aiSlots) aiSlots = loadAiSlots();
+  return aiSlots;
+}
 
 function studyView(mode) {
   if (mode === "notes" || mode === "speed" || mode === "ox" || mode === "text" || mode === "workbook" || mode === "guide") return mode;
@@ -326,8 +371,6 @@ function renderHome() {
 
   const plan = syncPlan();
   const model = Pcs.progress(plan, rec.questions);
-  $("q-done").textContent = String(rec.questions);
-  $("q-goal").textContent = String(plan.ox.target);
   $("today-pct").textContent = model.overall + "%";
   renderKindRows(model);
 
@@ -473,6 +516,7 @@ function show(view) {
     ox: "択一対策"
   };
   document.title = view === "home" ? "進捗管理" : titles[view] + " | 進捗管理";
+  if (view !== "text" && view !== "guide") textPanel = "read";
   if (view === "record") fillRecord();
   if (view === "settings") fillSettings();
   if (view !== "ox") {
@@ -487,6 +531,7 @@ function show(view) {
   if (view === "guide") renderGuide();
   if (view === "notes") renderNotes();
   if (view === "speed") renderSpeed();
+  if (view === "text") renderTextInto($("text-root"));
   if (view === "ox") renderOxDock();
   window.scrollTo(0, 0);
   requestAnimationFrame(() => window.scrollTo(0, 0));
@@ -746,6 +791,7 @@ function beginFromConfirm() {
     pickedRate = "";
     cloze = { key: "", total: 0, open: new Set() };
   }
+  if (mode === "text") textPanel = "read";
   session = createSession(mode, Date.now());
   lastScreen = "";
   stateBox.data.activeSession = session;
@@ -775,6 +821,7 @@ function finishSession() {
   session = null;
   guideHold = null;
   pickedRate = "";
+  textPanel = "read";
   lastScreen = "";
   closeEndConfirm();
   hideStudyChrome();
@@ -850,6 +897,7 @@ function afterPcsChange() {
     if (currentView() === "notes") renderNotes();
     if (currentView() === "speed") renderSpeed();
     if (currentView() === "today") renderToday();
+    if (currentView() === "text") renderTextInto($("text-root"));
     return;
   }
   const surface = guideSurface();
@@ -897,6 +945,206 @@ function appendStop(pad) {
   stop.type = "button";
   stop.dataset.act = "stop-study";
   pad.append(stop);
+}
+
+function bookMark() {
+  const wrap = el("div", "text-book");
+  wrap.setAttribute("aria-hidden", "true");
+  wrap.innerHTML = '<svg viewBox="0 0 48 48"><path fill="#F0D078" d="M23.4 13.2c-4.4-2.5-9.6-3.6-15.2-2.2-.5.1-1 .6-1 1.2v20.6c0 .7.6 1.2 1.3 1.1 5.6-1.2 10.2-.2 14.9 2.4V13.2z"/><path fill="#E2B84C" d="M24.6 13.2c4.4-2.5 9.6-3.6 15.2-2.2.5.1 1 .6 1 1.2v20.6c0 .7-.6 1.2-1.3 1.1-5.6-1.2-10.2-.2-14.9 2.4V13.2z"/><path fill="#fff6d4" d="M22.7 14.4h2.6V35h-2.6z"/></svg>';
+  return wrap;
+}
+
+function paintTextRange(input) {
+  const max = Number(input.max) || 1;
+  const pct = Math.max(0, Math.min(100, (Number(input.value) / max) * 100));
+  input.style.setProperty("--fill", pct + "%");
+}
+
+function renderTextRead(parent) {
+  const plan = Pcs.ensurePlan(stateBox.data, tokyoToday());
+  const item = plan.text;
+  const pages = item.pages;
+  const screen = el("div", "text-screen" + (sessionShowsTimer(currentView()) ? " has-timer" : ""));
+  const head = el("header", "text-head");
+  head.append(bookMark());
+  const main = el("div", "text-head-main");
+  const row = el("div", "text-title-row");
+  row.append(el("h1", "", "テキスト"));
+  const ai = el("button", "ai-pill", "AIサポート");
+  ai.type = "button";
+  ai.dataset.act = "open-ai";
+  row.append(ai);
+  main.append(row);
+  main.append(el("p", "text-source", "Vマジック"));
+  head.append(main);
+  screen.append(head);
+
+  const quota = el("section", "card text-quota-card");
+  quota.append(el("p", "text-kicker", "今日のノルマ"));
+  quota.append(el("p", "text-quota", Pcs.textQuotaLine(item)));
+  screen.append(quota);
+
+  const rangeCard = el("section", "card text-range-card");
+  rangeCard.append(el("p", "text-kicker", "今日の範囲"));
+  rangeCard.append(el("p", "text-span", Pcs.textRangeLabel(item)));
+  rangeCard.append(el("p", "text-meta", Pcs.textMetaLine(item)));
+  const range = document.createElement("input");
+  range.type = "range";
+  range.className = "text-range";
+  range.id = "text-read";
+  range.min = "0";
+  range.max = String(pages);
+  range.step = "1";
+  range.value = String(item.read);
+  range.setAttribute("aria-label", "読んだページ");
+  const count = el("p", "text-pages", Pcs.textCountLabel(item.read, pages));
+  range.addEventListener("input", () => {
+    count.textContent = Pcs.textCountLabel(range.value, pages);
+    paintTextRange(range);
+  });
+  rangeCard.append(range);
+  rangeCard.append(count);
+  paintTextRange(range);
+  const done = el("button", "btn-gold", "この範囲を読んだ");
+  done.type = "button";
+  done.dataset.act = "confirm-text";
+  const home = el("button", "text-home", "ホームへ戻る");
+  home.type = "button";
+  home.dataset.act = "text-home";
+  rangeCard.append(done, home);
+  screen.append(rangeCard);
+  parent.replaceChildren(screen);
+}
+
+function fileToImage(file) {
+  return new Promise((resolve, reject) => {
+    if (!file || !file.type || file.type.indexOf("image/") !== 0) {
+      reject(new Error("type"));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("read"));
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const max = 800;
+        let width = img.width || max;
+        let height = img.height || max;
+        const scale = Math.min(1, max / Math.max(width, height));
+        width = Math.max(1, Math.round(width * scale));
+        height = Math.max(1, Math.round(height * scale));
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL("image/jpeg", 0.65));
+      };
+      img.onerror = () => reject(new Error("img"));
+      img.src = String(reader.result || "");
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function rerenderTextSurface() {
+  const view = currentView();
+  if (view === "text") renderTextInto($("text-root"));
+  else if (view === "guide") renderGuide();
+}
+
+function storeSlotImage(index, file) {
+  fileToImage(file).then((url) => {
+    const slots = ensureAiSlots();
+    const previous = slots[index].image;
+    slots[index].image = url;
+    if (!saveAiSlots(slots)) {
+      slots[index].image = previous;
+      toast("画像を保存できませんでした");
+      return;
+    }
+    rerenderTextSurface();
+  }).catch(() => {
+    toast("画像ファイルを選んでください");
+  });
+}
+
+function renderAiSupport(parent) {
+  const slots = ensureAiSlots();
+  const screen = el("div", "text-screen ai-screen" + (sessionShowsTimer(currentView()) ? " has-timer" : ""));
+  const head = el("header", "ai-head");
+  const back = el("button", "ai-back", "‹");
+  back.type = "button";
+  back.dataset.act = "back-text";
+  back.setAttribute("aria-label", "テキストへ戻る");
+  head.append(back);
+  head.append(el("h1", "ai-title", "AIサポート"));
+  head.append(el("p", "ai-count", "20枠"));
+  screen.append(head);
+  const list = el("div", "ai-list");
+  slots.forEach((slot, index) => {
+    const row = el("div", "ai-slot");
+    row.append(el("span", "ai-num", String(index + 1).padStart(2, "0")));
+    const pick = el("label", "ai-pick");
+    pick.tabIndex = 0;
+    if (slot.image) {
+      const img = document.createElement("img");
+      img.alt = "";
+      img.src = slot.image;
+      pick.append(img);
+    } else {
+      pick.append(el("span", "ai-ph", "画像"));
+    }
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/*";
+    input.setAttribute("aria-label", (index + 1) + "枠の画像");
+    input.addEventListener("change", () => {
+      const file = input.files && input.files[0];
+      if (file) storeSlotImage(index, file);
+    });
+    pick.addEventListener("paste", (event) => {
+      const items = event.clipboardData && event.clipboardData.items;
+      if (!items) return;
+      for (let i = 0; i < items.length; i += 1) {
+        if (items[i].type && items[i].type.indexOf("image/") === 0) {
+          event.preventDefault();
+          storeSlotImage(index, items[i].getAsFile());
+          break;
+        }
+      }
+    });
+    pick.append(input);
+    const memo = document.createElement("textarea");
+    memo.className = "ai-memo";
+    memo.placeholder = "メモ・質問";
+    memo.value = slot.text;
+    memo.setAttribute("aria-label", (index + 1) + "枠のメモ");
+    memo.addEventListener("input", () => {
+      const current = ensureAiSlots();
+      current[index].text = memo.value;
+      if (!saveAiSlots(current)) toast("この端末に保存できませんでした");
+    });
+    row.append(pick, memo);
+    list.append(row);
+  });
+  screen.append(list);
+  parent.replaceChildren(screen);
+}
+
+function renderTextInto(parent) {
+  if (!parent) return;
+  if (textPanel === "ai") renderAiSupport(parent);
+  else renderTextRead(parent);
+}
+
+function leaveTextHome() {
+  if (!session) {
+    navigateTo("home");
+    return;
+  }
+  pendingLeave = "home";
+  openEndConfirm();
 }
 
 function renderToday() {
@@ -1211,6 +1459,11 @@ function renderGuide() {
     return;
   }
   if (step.kind === "ox") return;
+  if (step.kind === "text" && !step.placeholder) {
+    renderTextInto(root);
+    return;
+  }
+  textPanel = "read";
   if (step.placeholder) {
     renderPlaceholder(root, step);
     return;
@@ -1254,6 +1507,7 @@ function beginToday() {
   }
   guideHold = null;
   pickedRate = "";
+  textPanel = "read";
   cloze = { key: "", total: 0, open: new Set() };
   session = createSession("guide", Date.now());
   lastScreen = "";
@@ -1362,6 +1616,22 @@ function handleAct(node) {
       speedUi.qIndex = 0;
     }
     renderSpeed();
+  } else if (act === "open-ai") {
+    textPanel = "ai";
+    rerenderTextSurface();
+    window.scrollTo(0, 0);
+  } else if (act === "back-text") {
+    textPanel = "read";
+    rerenderTextSurface();
+    window.scrollTo(0, 0);
+  } else if (act === "confirm-text") {
+    const range = $("text-read");
+    const value = range ? Number(range.value) : 0;
+    Pcs.confirmTextPages(stateBox.data, tokyoToday(), value);
+    afterPcsChange();
+    toast("読んだページを記録しました");
+  } else if (act === "text-home") {
+    leaveTextHome();
   } else if (act === "pass-placeholder") {
     const step = currentStep();
     if (!step || !step.placeholder) return;
@@ -1550,6 +1820,8 @@ function bind() {
     if (dock) dock.hidden = true;
     document.body.classList.remove("is-guide-ox");
     hideStudyChrome();
+    textPanel = "read";
+    aiSlots = null;
     stateBox.data = seed();
     save(stateBox.data);
     fillSettings();
@@ -1610,6 +1882,7 @@ if (typeof module !== "undefined" && module.exports) {
     oxFrameUrl,
     queueOpensOx,
     OX_URL,
-    OX_QUEUE_URL
+    OX_QUEUE_URL,
+    normalizeAiSlots
   };
 }

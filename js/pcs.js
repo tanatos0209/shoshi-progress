@@ -2,9 +2,10 @@
 
 /*
  * Perfect Control daily plan.
- * Percents are an unweighted average of the kinds scheduled today
- * (テキストまとめ, 択一対策, スピードチェック). テキスト and 問題集 stay
- * on the list as 準備中 and do not enter the average.
+ * The overall percent is an unweighted average of the five breakdown
+ * rows: テキスト, 問題集, テキストまとめ, 択一対策, スピードチェック.
+ * A row at 0% still counts, so 0/0/100/100/100 is 60, not 100.
+ * テキスト is pages read / today's page quota. 問題集 stays 準備中 at 0%.
  * Cloze lines are original drill prompts tagged with a source book.
  */
 const Pcs = (function () {
@@ -15,12 +16,20 @@ const Pcs = (function () {
     B: "Vマジック"
   };
   const ROWS = [
-    { id: "text", label: "テキスト", feeds: false },
-    { id: "workbook", label: "問題集", feeds: false },
+    { id: "text", label: "テキスト", feeds: true },
+    { id: "workbook", label: "問題集", feeds: true },
     { id: "notes", label: "テキストまとめ", feeds: true },
     { id: "ox", label: "択一対策", feeds: true },
     { id: "speed", label: "スピードチェック", feeds: true }
   ];
+  /* Sample range for the text screen. Subject keeps its own volume mark
+     (不動産登記法Ⅰ). No separate leading volume digit. */
+  const TEXT_ASSIGNMENT = {
+    subject: "不動産登記法Ⅰ",
+    source: "B",
+    start: 1,
+    end: 19
+  };
 
   const NOTES = [
     {
@@ -116,6 +125,48 @@ const Pcs = (function () {
   function sourceName(id) {
     if (id === "A") return SOURCES.A;
     return SOURCES.B;
+  }
+
+  function cleanSubject(value) {
+    const text = String(value || "").replace(/^[0-9]+\s+/, "").replace(/^[ⅠⅡⅢⅣⅤ]\s+/, "").trim();
+    return text || TEXT_ASSIGNMENT.subject;
+  }
+
+  function storedText(raw) {
+    const source = raw && typeof raw === "object" ? raw : TEXT_ASSIGNMENT;
+    const subject = cleanSubject(source.subject || TEXT_ASSIGNMENT.subject);
+    const start = Math.max(1, Math.round(Number(source.start) || TEXT_ASSIGNMENT.start));
+    const end = Math.max(start, Math.round(Number(source.end) || TEXT_ASSIGNMENT.end));
+    const pages = end - start + 1;
+    const read = Math.max(0, Math.min(pages, Math.round(Number(source.read) || 0)));
+    return { subject, source: "B", start, end, pages, read };
+  }
+
+  function freshText() {
+    return storedText(TEXT_ASSIGNMENT);
+  }
+
+  function textQuotaLine(text) {
+    const item = storedText(text || TEXT_ASSIGNMENT);
+    return item.subject + " p." + item.start + "–" + item.end + "（" + item.pages + "ページ）";
+  }
+
+  function textRangeLabel(text) {
+    const item = storedText(text || TEXT_ASSIGNMENT);
+    return "p." + item.start + " – " + item.end;
+  }
+
+  function textMetaLine(text) {
+    const item = storedText(text || TEXT_ASSIGNMENT);
+    return item.subject + " ・ " + item.pages + "ページ";
+  }
+
+  function textCountLabel(read, pages) {
+    return Math.max(0, Math.round(Number(read) || 0)) + "/" + Math.max(0, Math.round(Number(pages) || 0)) + "ページ";
+  }
+
+  function textScheduled(plan) {
+    return !!(plan && plan.text && (Number(plan.text.pages) > 0 || Number(plan.text.end) > 0));
   }
 
   function noteById(id) {
@@ -248,6 +299,7 @@ const Pcs = (function () {
       rec.pcs.speed.reviewed = Array.isArray(rec.pcs.speed.reviewed) ? rec.pcs.speed.reviewed : [];
       rec.pcs.speed.answered = Array.isArray(rec.pcs.speed.answered) ? rec.pcs.speed.answered : [];
       rec.pcs.started = rec.pcs.started === true;
+      rec.pcs.text = textScheduled(rec.pcs) ? storedText(rec.pcs.text) : freshText();
       if (!rec.pcs.completion) rec.pcs.completion = stamp(rec.pcs, rec.questions);
       return rec.pcs;
     }
@@ -261,6 +313,7 @@ const Pcs = (function () {
       date: today,
       started: false,
       seen: { text: false, workbook: false },
+      text: freshText(),
       notes: { ids: notesSel.ids, roles: notesSel.roles, done: [] },
       ox: { target: oxTarget },
       speed: {
@@ -297,17 +350,37 @@ const Pcs = (function () {
     return Math.max(0, Math.min(100, (done / target) * 100));
   }
 
-  function progress(plan, questions) {
-    const oxDone = Math.max(0, Math.round(Number(questions) || 0));
-    const parts = [];
-    function push(id, done, target) {
-      const value = percent(done, target);
-      if (value == null) return;
-      parts.push({ id, done, target, percent: value });
+  function kindMetric(plan, questions, id) {
+    if (id === "text") {
+      if (!textScheduled(plan)) return { done: 0, target: 0 };
+      const item = storedText(plan.text);
+      return { done: item.read, target: item.pages };
     }
-    push("notes", plan.notes.done.length, plan.notes.ids.length);
-    push("ox", oxDone, plan.ox.target);
-    push("speed", plan.speed.reviewed.length + plan.speed.answered.length, plan.speed.topics.length + plan.speed.questions.length);
+    if (id === "workbook") return { done: 0, target: 0 };
+    if (id === "notes") return { done: plan.notes.done.length, target: plan.notes.ids.length };
+    if (id === "ox") {
+      return {
+        done: Math.max(0, Math.round(Number(questions) || 0)),
+        target: plan.ox.target
+      };
+    }
+    return {
+      done: plan.speed.reviewed.length + plan.speed.answered.length,
+      target: plan.speed.topics.length + plan.speed.questions.length
+    };
+  }
+
+  function progress(plan, questions) {
+    const parts = ROWS.map((row) => {
+      const metric = kindMetric(plan, questions, row.id);
+      const value = metric.target > 0 ? percent(metric.done, metric.target) : 0;
+      return {
+        id: row.id,
+        done: metric.done,
+        target: metric.target,
+        percent: value == null ? 0 : value
+      };
+    });
     const overall = parts.length ? Math.round(parts.reduce((sum, part) => sum + part.percent, 0) / parts.length) : 0;
     const rows = ROWS.map((row) => {
       const part = parts.find((item) => item.id === row.id);
@@ -330,8 +403,13 @@ const Pcs = (function () {
       let finished = false;
       let done = 0;
       let target = 0;
-      if (!row.feeds) {
-        finished = !!(plan.seen && plan.seen[row.id]);
+      if (row.id === "text") {
+        done = kindMetric(plan, questions, "text").done;
+        target = kindMetric(plan, questions, "text").target;
+        finished = target > 0 && done >= target;
+        status = target > 0 ? done + "/" + target : "準備中";
+      } else if (row.id === "workbook") {
+        finished = !!(plan.seen && plan.seen.workbook);
         status = finished ? "スキップ済み" : "準備中";
       } else if (row.id === "notes") {
         done = plan.notes.done.length;
@@ -371,8 +449,13 @@ const Pcs = (function () {
   }
 
   function nextStep(plan, questions) {
-    if (!plan.seen || !plan.seen.text) return { kind: "text", placeholder: true };
-    if (!plan.seen.workbook) return { kind: "workbook", placeholder: true };
+    if (textScheduled(plan)) {
+      const item = storedText(plan.text);
+      if (item.read < item.pages) return { kind: "text" };
+    } else if (!plan.seen || !plan.seen.text) {
+      return { kind: "text", placeholder: true };
+    }
+    if (!plan.seen || !plan.seen.workbook) return { kind: "workbook", placeholder: true };
     const noteId = plan.notes.ids.find((id) => plan.notes.done.indexOf(id) === -1);
     if (noteId) return { kind: "notes", id: noteId, role: plan.notes.roles[noteId] || "new" };
     const oxDone = Math.max(0, Math.round(Number(questions) || 0));
@@ -398,6 +481,7 @@ const Pcs = (function () {
   }
 
   function hasResume(plan, questions) {
+    if (textScheduled(plan) && storedText(plan.text).read > 0) return true;
     if (plan.seen && (plan.seen.text || plan.seen.workbook)) return true;
     if (plan.notes.done.length > 0) return true;
     if (Math.round(Number(questions) || 0) > 0) return true;
@@ -433,9 +517,25 @@ const Pcs = (function () {
   function passPlaceholder(data, today, kind) {
     if (kind !== "text" && kind !== "workbook") return { changed: false };
     const plan = ensurePlan(data, today);
-    if (plan.seen[kind]) return { changed: false, progress: progress(plan, ensureLog(data, today).questions) };
+    const rec = ensureLog(data, today);
+    if (kind === "text" && textScheduled(plan)) {
+      return { changed: false, progress: progress(plan, rec.questions) };
+    }
+    if (plan.seen[kind]) return { changed: false, progress: progress(plan, rec.questions) };
     plan.seen[kind] = true;
-    return { changed: true, progress: progress(plan, ensureLog(data, today).questions) };
+    return { changed: true, progress: progress(plan, rec.questions) };
+  }
+
+  function confirmTextPages(data, today, read) {
+    const plan = ensurePlan(data, today);
+    const rec = ensureLog(data, today);
+    const item = storedText(plan.text);
+    const next = Math.max(0, Math.min(item.pages, Math.round(Number(read) || 0)));
+    const changed = item.read !== next;
+    plan.text = storedText({ ...item, read: next });
+    if (next > 0) plan.started = true;
+    stamp(plan, rec.questions);
+    return { changed, progress: progress(plan, rec.questions) };
   }
 
   function completeNote(data, today, id, result) {
@@ -494,6 +594,12 @@ const Pcs = (function () {
     BASE,
     SOURCES,
     ROWS,
+    TEXT_ASSIGNMENT,
+    cleanSubject,
+    textQuotaLine,
+    textRangeLabel,
+    textMetaLine,
+    textCountLabel,
     NOTES,
     SPEED_CHAPTERS,
     addDays,
@@ -512,6 +618,7 @@ const Pcs = (function () {
     stepLabel,
     hasResume,
     passPlaceholder,
+    confirmTextPages,
     completeNote,
     completeOxOne,
     reviewSpeedTopic,
