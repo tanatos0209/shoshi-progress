@@ -49,6 +49,8 @@ a, button { touch-action: manipulation; -webkit-tap-highlight-color: transparent
 
 .view.is-on.stack { display: flex !important; }
 
+.view[hidden] { display: none !important; }
+
 .study-view {
   position: relative;
   min-height: calc(100svh - 74px);
@@ -964,8 +966,8 @@ body.is-timing .content {
 .tbtn svg { width: 20px; height: 20px; display: block; flex: 0 0 auto; }
 
 .tbtn-pause {
-  background-color: #3c4e6b;
-  background-image: linear-gradient(180deg, #51627f 0%, #313e56 100%);
+  background-color: #5c6570;
+  background-image: linear-gradient(180deg, #7b8490 0%, #5c6570 100%);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), 0 8px 16px rgba(0, 0, 0, 0.28);
 }
 
@@ -1173,12 +1175,12 @@ body.is-ox .content {
   width: 100%;
   height: 100%;
   border: 0;
-  background: #0d2318;
+  background: #03150f;
 }
 
 .measure-badge {
   position: fixed;
-  z-index: 32;
+  z-index: 80;
   top: calc(10px + env(safe-area-inset-top));
   right: max(12px, calc((100vw - min(480px, 100vw)) / 2 + 12px));
   display: inline-flex;

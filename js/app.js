@@ -37,6 +37,7 @@ let pendingLeave = null;
 let endConfirmOpen = false;
 let hashGuard = false;
 let lastScreen = "";
+let oxRelease = false;
 
 function studyView(mode) {
   if (mode === "notes" || mode === "speed" || mode === "ox") return mode;
@@ -302,22 +303,65 @@ function currentView() {
   return known.includes(hash) ? hash : "home";
 }
 
+function oxFrameHref(frame) {
+  try {
+    return frame.contentWindow && frame.contentWindow.location ? frame.contentWindow.location.href : "";
+  } catch (err) {
+    return frame.getAttribute("src") || "";
+  }
+}
+
+function armIframeGuard(frame) {
+  try {
+    const win = frame.contentWindow;
+    if (!win || win.__shoshiGuard) return;
+    win.__shoshiGuard = true;
+    win.history.pushState({ shoshiGuard: 1 }, "", win.location.href);
+    win.addEventListener("popstate", () => {
+      if (!session || oxRelease) return;
+      try {
+        const href = win.location.href;
+        if (!href || href === "about:blank") win.location.replace(OX_URL);
+        else win.history.pushState({ shoshiGuard: 1 }, "", href);
+      } catch (err) { /* parent session still owns the back gesture */ }
+      promptSessionEnd();
+    });
+  } catch (err) {
+    /* cross-origin frame: the parent history guard handles swipe-back */
+  }
+}
+
 function ensureOxFrame() {
   const frame = $("ox-frame");
-  if (!frame || frame.dataset.loaded === "1") return;
+  if (!frame || oxRelease) return;
+  const href = oxFrameHref(frame);
+  if (frame.dataset.loaded === "1" && href.includes("shoshi-ox")) {
+    frame.hidden = false;
+    return;
+  }
   frame.dataset.loaded = "1";
   frame.hidden = true;
-  frame.addEventListener("load", () => {
-    if (frame.dataset.loaded === "1") frame.hidden = false;
-  }, { once: true });
+  frame.onload = () => {
+    if (oxRelease || frame.dataset.loaded !== "1") return;
+    const next = oxFrameHref(frame);
+    if (!next || next === "about:blank" || !next.includes("shoshi-ox")) {
+      frame.hidden = true;
+      return;
+    }
+    frame.hidden = false;
+    armIframeGuard(frame);
+  };
   frame.src = OX_URL;
 }
 
 function releaseOxFrame() {
   const frame = $("ox-frame");
-  if (!frame || frame.dataset.loaded !== "1") return;
+  if (!frame) return;
+  oxRelease = true;
+  frame.hidden = true;
   frame.dataset.loaded = "";
-  frame.removeAttribute("src");
+  frame.onload = null;
+  if (frame.getAttribute("src")) frame.src = "about:blank";
 }
 
 function show(view) {
@@ -329,8 +373,10 @@ function show(view) {
     node.classList.toggle("is-on", on);
   });
   document.body.classList.toggle("is-ox", view === "ox");
-  if (view === "ox") ensureOxFrame();
-  else releaseOxFrame();
+  if (view === "ox") {
+    oxRelease = false;
+    ensureOxFrame();
+  } else releaseOxFrame();
 
   const tab = view === "notes" || view === "speed" || view === "ox" ? "home" : view;
   document.querySelectorAll(".tab").forEach((node) => {
@@ -555,9 +601,40 @@ function stopTicker() {
   ticker = 0;
 }
 
+function armStudyGuard() {
+  if (!session) return;
+  const view = studyView(session.mode);
+  const url = location.pathname + location.search + "#" + view;
+  hashGuard = true;
+  history.pushState({ studyGuard: true, view }, "", url);
+  hashGuard = false;
+}
+
 function enterStudy(mode) {
   navigateTo(studyView(mode));
+  armStudyGuard();
   startTicker();
+}
+
+function promptSessionEnd() {
+  if (!session) return;
+  const view = studyView(session.mode);
+  hashGuard = true;
+  history.pushState({ studyGuard: true, view }, "", location.pathname + location.search + "#" + view);
+  hashGuard = false;
+  if (endConfirmOpen) return;
+  oxRelease = false;
+  show(view);
+  if (view === "ox") {
+    const frame = $("ox-frame");
+    const href = frame ? oxFrameHref(frame) : "";
+    if (!href.includes("shoshi-ox")) {
+      if (frame) frame.hidden = true;
+      ensureOxFrame();
+    }
+  }
+  pendingLeave = "home";
+  openEndConfirm();
 }
 
 function openStart(mode) {
@@ -589,7 +666,7 @@ function openEndConfirm() {
   if (!session || endConfirmOpen) return;
   endConfirmOpen = true;
   $("end-sheet").hidden = false;
-  $("end-no").focus();
+  $("end-title").focus();
 }
 
 function closeEndConfirm() {
@@ -614,20 +691,34 @@ function finishSession() {
 
 function bind() {
   function onRoute(view) {
-    if (session && view !== studyView(session.mode)) {
-      pendingLeave = view;
-      openEndConfirm();
-      navigateTo(studyView(session.mode), true);
+    if (!session) {
+      show(view);
       return;
     }
-    show(view);
+    if (view === studyView(session.mode)) {
+      show(view);
+      return;
+    }
+    promptSessionEnd();
   }
 
   window.addEventListener("hashchange", () => {
     if (hashGuard) return;
     onRoute(currentView());
   });
-  window.addEventListener("popstate", () => onRoute(currentView()));
+  window.addEventListener("popstate", () => {
+    if (hashGuard) return;
+    if (session) {
+      promptSessionEnd();
+      return;
+    }
+    const view = currentView();
+    if (view === "notes" || view === "speed" || view === "ox") {
+      navigateTo("home", true);
+      return;
+    }
+    show(view);
+  });
 
   document.querySelectorAll("a[href^='#']").forEach((link) => {
     link.addEventListener("click", (event) => {
@@ -637,6 +728,7 @@ function bind() {
       const view = href.slice(1);
       if (session && view !== studyView(session.mode)) {
         pendingLeave = document.getElementById("view-" + view) ? view : "home";
+        show(studyView(session.mode));
         openEndConfirm();
         return;
       }
@@ -765,6 +857,7 @@ function boot() {
     session = tickSession(session, now);
     flushSession(now, false);
     navigateTo(studyView(session.mode), true);
+    armStudyGuard();
     startTicker();
   } else if (location.hash && location.hash !== "#home") {
     show(currentView());
