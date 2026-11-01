@@ -6,7 +6,7 @@
 
 ## パス
 
-配信パスは `/shoshi-progress/` です。HTML・CSS・JS・画像・manifest・Service Worker は相対パスです。`manifest` の `start_url` と `scope` は `./`、キャッシュ名は `shoshi-progress-v13` です。
+配信パスは `/shoshi-progress/` です。HTML・CSS・JS・画像・manifest・Service Worker は相対パスです。`manifest` の `start_url` と `scope` は `./`、キャッシュ名は `shoshi-progress-v14` です。
 
 ## GitHub Pages
 
@@ -30,7 +30,7 @@
 
 ### 一度だけの Firebase 設定
 
-Spark（無料）枠で足ります。このリポジトリに本物の鍵は入れていません。`js/firebase-config.js` の空欄を、自分のプロジェクトの値で埋めてください。ウェブ API キーはページに載る前提で、秘密情報ではありません。守るのは Firestore のルールです。サーバ用の秘密鍵やサービスアカウントは置かないでください。
+Spark（無料）枠で足ります。本番のウェブ設定（プロジェクト `shoshi-sync`）は `js/firebase-config.js` に入っています。ウェブ API キーはページに載る前提で、秘密情報ではありません。守るのは Firestore のルールです。サーバ用の秘密鍵やサービスアカウントは置かないでください。
 
 1. [Firebase console](https://console.firebase.google.com/) でプロジェクトを作る。料金プランは Spark のままにする。
 2. プロジェクトにウェブアプリを追加する。表示された設定を `js/firebase-config.js` の `window.SHOSHI_FIREBASE_CONFIG` に貼る。`apiKey` `authDomain` `projectId` `appId` は必須です。
@@ -38,7 +38,7 @@ Spark（無料）枠で足ります。このリポジトリに本物の鍵は入
 4. **Authentication → Settings → Authorized domains** に `tanatos0209.github.io` を追加する。`localhost` は最初から入っています。
 5. **Build → Firestore Database** でデータベースを作る。ロケーションは `asia-northeast1`（東京）でよい。本番モードで作成してよい。
 6. **Firestore → Rules** に、このリポジトリの `firestore.rules` をそのまま貼って公開する。
-7. 埋めた `js/firebase-config.js` を保存し、`main` に載せる。Service Worker はネットワークを優先するので、オンラインの端末は新しい設定を取ります。反映されないときはアプリを一度閉じます。キャッシュ名は `shoshi-progress-v13` です。
+7. 埋めた `js/firebase-config.js` を保存し、`main` に載せる。Service Worker はネットワークを優先するので、オンラインの端末は新しい設定を取ります。反映されないときはアプリを一度閉じます。キャッシュ名は `shoshi-progress-v14` です。
 
 設定が空のあいだは「Firebase未設定（この端末のみ）」と出ます。アプリはこれまでどおり、この端末だけで動きます。同じ設定値を shoshi-ox にも入れると、一つの Google アカウントで両方のアプリを使えます。
 
