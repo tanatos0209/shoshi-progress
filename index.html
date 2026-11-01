@@ -17,7 +17,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&display=swap" rel="stylesheet"/>
-<link rel="stylesheet" href="css/app.css?v=7"/>
+<link rel="stylesheet" href="css/app.css?v=8"/>
 <style>html,body{background:#03150f}</style>
 </head>
 <body>
@@ -102,23 +102,28 @@
       <section class="card" aria-label="今日の進捗">
         <div class="card-head">
           <h2>今日の進捗</h2>
-          <p class="qmeta">今日 <b id="q-done" class="gold-text">6</b>問 / 目標 <b id="q-goal" class="gold-text">20</b>問</p>
+          <div class="progress-side">
+            <p class="qmeta">今日 <b id="q-done" class="gold-text">0</b>問 / 目標 <b id="q-goal" class="gold-text">20</b>問</p>
+            <p class="today-pct gold-text" id="today-pct" aria-live="polite">0%</p>
+          </div>
         </div>
-        <div class="meter" id="meter">
-          <span class="meter-fill" id="q-fill"><em id="q-pct">30%</em></span>
-        </div>
-        <p class="meter-out" id="meter-out"></p>
-        <a class="cta" data-external="ox" href="https://tanatos0209.github.io/shoshi-ox/">
+        <div id="kind-list" class="kind-list" role="group" aria-label="今日の内訳"></div>
+        <button type="button" class="cta" id="start-today">
           <strong>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M8 5v14l12-7z"/></svg>
             今日の学習を開始
           </strong>
           <small>- 自動復習モード -</small>
-        </a>
+        </button>
       </section>
 
       <div class="subjects">
         <h2 class="section-label">科目別進捗</h2>
+        <button type="button" class="card acc-toggle" id="subject-toggle" aria-expanded="false" aria-controls="subject-panel">
+          <span>科目別進捗</span>
+          <svg class="chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <div id="subject-panel" class="acc-panel" hidden>
         <article class="card subject">
           <div class="subject-grid">
             <div class="s-icon" aria-hidden="true">
@@ -159,10 +164,23 @@
             <div class="track" aria-hidden="true"><span id="minor-bar"></span></div>
           </div>
         </article>
+        </div>
       </div>
     </section>
 
+    <section id="view-today" class="view" hidden>
+      <div id="today-root"></div>
+    </section>
+
+    <section id="view-guide" class="view study-view" hidden>
+      <div id="guide-root"></div>
+    </section>
+
     <section id="view-notes" class="view study-view" hidden>
+      <div id="notes-root"></div>
+    </section>
+
+    <section id="view-text" class="view study-view" hidden>
       <div class="ph">
         <div class="ph-mark" aria-hidden="true">
           <svg viewBox="0 0 48 48">
@@ -170,9 +188,24 @@
             <path fill="#E2B84C" d="M24.6 13.2c4.4-2.5 9.6-3.6 15.2-2.2.5.1 1 .6 1 1.2v20.6c0 .7-.6 1.2-1.3 1.1-5.6-1.2-10.2-.2-14.9 2.4V13.2z"/>
           </svg>
         </div>
-        <h2>テキストまとめ</h2>
+        <h2>テキスト</h2>
         <p class="ph-badge">準備中</p>
-        <p>要点を整理する画面は、これからこの中に追加します。</p>
+        <p>条文テキストの画面は、これからこの中に追加します。</p>
+        <a class="ph-back" href="#home">ホームへ戻る</a>
+      </div>
+    </section>
+
+    <section id="view-workbook" class="view study-view" hidden>
+      <div class="ph">
+        <div class="ph-mark" aria-hidden="true">
+          <svg viewBox="0 0 48 48">
+            <path fill="#F0D078" d="M10 8h20l8 8v24H10z"/>
+            <path fill="#fff6d4" d="M30 8v8h8"/>
+          </svg>
+        </div>
+        <h2>問題集</h2>
+        <p class="ph-badge">準備中</p>
+        <p>問題集の画面は、これからこの中に追加します。</p>
         <a class="ph-back" href="#home">ホームへ戻る</a>
       </div>
     </section>
@@ -186,18 +219,7 @@
     </section>
 
     <section id="view-speed" class="view study-view" hidden>
-      <div class="ph">
-        <div class="ph-mark" aria-hidden="true">
-          <svg viewBox="0 0 48 48">
-            <rect x="14" y="4.5" width="20" height="39" rx="4" fill="none" stroke="#F0D078" stroke-width="2.4"/>
-            <path fill="#F0D078" d="M26.4 13.2 19.6 24.4h4.6L21.4 35l9.2-13.6h-4.8z"/>
-          </svg>
-        </div>
-        <h2>スピードチェック</h2>
-        <p class="ph-badge">準備中</p>
-        <p>瞬発力の確認画面は、これからこの中に追加します。</p>
-        <a class="ph-back" href="#home">ホームへ戻る</a>
-      </div>
+      <div id="speed-root"></div>
     </section>
 
     <section id="view-record" class="view" hidden>
@@ -297,11 +319,18 @@
         </div>
         <button type="button" class="btn-gold" id="save-settings">保存する</button>
         <button type="button" class="btn-quiet" id="reset-demo">デモ表示に戻す</button>
-        <p class="hint">連続日数は、その日の学習時間が30分以上になったときだけ増えます。アプリを開いただけでは増えません。今週のグラフは、記録するまでは見本です。時間を記録すると、実際の記録に切り替わります。</p>
+        <p class="hint">連続日数は、その日の学習時間が30分以上になったときだけ増えます。アプリを開いただけでは増えません。今週のグラフは、記録するまでは見本です。時間を記録すると、実際の記録に切り替わります。択一の1日の問数は、前日に学習を始めた日の達成率で、翌日だけ±1されます。</p>
       </section>
     </section>
   </div>
 
+  <div id="ox-dock" class="ox-dock" hidden>
+    <p id="ox-dock-label">今日 0 / 20問</p>
+    <div class="ox-dock-actions">
+      <button type="button" class="tbtn tbtn-gold" data-act="ox-one">この1問を終えた</button>
+      <button type="button" class="tbtn tbtn-ghost" data-act="stop-study">いったん終了</button>
+    </div>
+  </div>
   <p id="measure-badge" class="measure-badge" hidden><span>計測中</span> <b id="measure-clock">25:00</b></p>
   <div id="pom-overlay" class="pom-overlay" hidden>
     <div id="pom-over" class="pom-card" hidden>
@@ -410,7 +439,8 @@
     </div>
   </div>
 </div>
-<script src="js/rules.js?v=7"></script>
-<script src="js/app.js?v=7"></script>
+<script src="js/rules.js?v=8"></script>
+<script src="js/pcs.js?v=8"></script>
+<script src="js/app.js?v=8"></script>
 </body>
 </html>

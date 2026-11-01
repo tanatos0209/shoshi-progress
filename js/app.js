@@ -39,10 +39,26 @@ let endConfirmOpen = false;
 let hashGuard = false;
 let lastScreen = "";
 let oxRelease = false;
+let guideHold = null;
+let pickedRate = "";
+let cloze = { key: "", total: 0, open: new Set() };
+let speedUi = { level: "chapters", chapterId: "", topicId: "", qIndex: 0, feedback: null };
 
 function studyView(mode) {
-  if (mode === "notes" || mode === "speed" || mode === "ox") return mode;
+  if (mode === "notes" || mode === "speed" || mode === "ox" || mode === "text" || mode === "workbook" || mode === "guide") return mode;
   return "home";
+}
+
+function routeAllowed(view) {
+  if (!session) return true;
+  if (view === studyView(session.mode)) return true;
+  return session.mode === "guide" && (view === "guide" || view === "ox");
+}
+
+function sessionShowsTimer(view) {
+  if (!session) return false;
+  if (view === studyView(session.mode)) return true;
+  return session.mode === "guide" && view === "ox";
 }
 
 const DAILY_GOAL_MINUTES = 240;
@@ -82,8 +98,27 @@ function seed() {
     log: {
       [today]: { minutes: 0, questions: 0, carryMs: 0 }
     },
+    srs: { notes: {}, speed: {} },
     activeSession: null
   };
+}
+
+function cleanSrs(raw) {
+  const out = {};
+  if (!raw || typeof raw !== "object") return out;
+  Object.keys(raw).forEach((id) => {
+    const item = raw[id];
+    if (!item || typeof item !== "object") return;
+    out[id] = {
+      introduced: typeof item.introduced === "string" ? item.introduced : "",
+      due: typeof item.due === "string" ? item.due : "",
+      interval: Math.max(0, Math.round(Number(item.interval) || 0)),
+      priority: Math.max(0, Math.round(Number(item.priority) || 0)),
+      lastResult: item.lastResult === "unknown" ? "unknown" : "known",
+      lastDay: typeof item.lastDay === "string" ? item.lastDay : ""
+    };
+  });
+  return out;
 }
 
 function normalize(data) {
@@ -97,6 +132,10 @@ function normalize(data) {
       minor: { ...base.subjects.minor, ...(subjects.minor || {}) }
     },
     log: data.log && typeof data.log === "object" ? data.log : base.log,
+    srs: {
+      notes: cleanSrs(data.srs && data.srs.notes),
+      speed: cleanSrs(data.srs && data.srs.speed)
+    },
     demo: typeof data.demo === "boolean" ? data.demo : true,
     studied: data.studied === true,
     streak: Math.max(0, Math.round(Number(data.streak) || 0)),
@@ -111,14 +150,21 @@ function settle(data) {
   data.examDate = computeExamDate(today);
   data.dailyGoalMinutes = DAILY_GOAL_MINUTES;
   if (data.demo && !data.studied && !data.activeSession) {
+    const prev = (data.log && data.log[today]) || {};
     data.log = {
-      [today]: { minutes: 0, questions: 0, carryMs: 0 }
+      [today]: {
+        minutes: 0,
+        questions: Math.max(0, Math.round(Number(prev.questions) || 0)),
+        carryMs: 0
+      }
     };
+    if (prev.pcs) data.log[today].pcs = prev.pcs;
     data.streak = 0;
     data.lastStudyDate = "";
-    return;
+  } else {
+    syncStreak(data, today);
   }
-  syncStreak(data, today);
+  Pcs.ensurePlan(data, today);
 }
 
 function load() {
@@ -164,7 +210,8 @@ function materializeDemo(data) {
       data.log[key] = {
         minutes: Math.max(0, Math.round(Number(current.minutes) || 0)),
         questions: Math.max(0, Math.round(Number(current.questions) || 0)),
-        carryMs: Math.max(0, Number(current.carryMs) || 0)
+        carryMs: Math.max(0, Number(current.carryMs) || 0),
+        pcs: current.pcs
       };
     } else {
       const prev = data.log[key] || {};
@@ -266,15 +313,12 @@ function renderHome() {
     days.append(span);
   });
 
-  const goalQ = Math.max(1, Math.round(Number(data.dailyQuestionGoal) || 1));
-  const percent = clamp(Math.round((rec.questions / goalQ) * 100), 0, 999);
-  const shown = Math.min(100, percent);
+  const plan = syncPlan();
+  const model = Pcs.progress(plan, rec.questions);
   $("q-done").textContent = String(rec.questions);
-  $("q-goal").textContent = String(goalQ);
-  $("q-fill").style.width = shown + "%";
-  $("q-pct").textContent = percent + "%";
-  $("meter").classList.toggle("low", shown < 16);
-  $("meter-out").textContent = percent + "%";
+  $("q-goal").textContent = String(plan.ox.target);
+  $("today-pct").textContent = model.overall + "%";
+  renderKindRows(model);
 
   paintSubject("main", data.subjects.main);
   paintSubject("minor", data.subjects.minor);
@@ -296,7 +340,7 @@ function paintSubject(key, subject) {
 
 function currentView() {
   const hash = (location.hash || "#home").replace("#", "");
-  const known = ["home", "notes", "ox", "speed", "record", "perfect", "calendar", "settings"];
+  const known = ["home", "notes", "ox", "speed", "record", "perfect", "calendar", "settings", "today", "guide", "text", "workbook"];
   return known.includes(hash) ? hash : "home";
 }
 
@@ -362,6 +406,17 @@ function releaseOxFrame() {
 }
 
 function show(view) {
+  if (view === "guide" && !(session && session.mode === "guide")) {
+    navigateTo("today", true);
+    return;
+  }
+  if (view === "guide" && session && session.mode === "guide" && !guideHold) {
+    const step = currentStep();
+    if (step && step.kind === "ox") {
+      navigateTo("ox", true);
+      return;
+    }
+  }
   if (!document.getElementById("view-" + view)) view = "home";
   document.body.classList.remove("is-timing");
   document.querySelectorAll(".view").forEach((node) => {
@@ -375,7 +430,8 @@ function show(view) {
     ensureOxFrame();
   } else releaseOxFrame();
 
-  const tab = view === "notes" || view === "speed" || view === "ox" ? "home" : view;
+  const learning = view === "notes" || view === "speed" || view === "ox" || view === "text" || view === "workbook" || view === "guide" || view === "today";
+  const tab = learning ? "home" : view;
   document.querySelectorAll(".tab").forEach((node) => {
     const on = node.dataset.tab === tab;
     node.classList.toggle("active", on);
@@ -386,6 +442,10 @@ function show(view) {
     home: "進捗管理",
     notes: "テキストまとめ",
     speed: "スピードチェック",
+    text: "テキスト",
+    workbook: "問題集",
+    today: "今日の課題",
+    guide: "今日の課題",
     record: "記録する",
     perfect: "パーフェクトコントロール",
     calendar: "カレンダー",
@@ -395,9 +455,19 @@ function show(view) {
   document.title = view === "home" ? "進捗管理" : titles[view] + " | 進捗管理";
   if (view === "record") fillRecord();
   if (view === "settings") fillSettings();
+  if (view !== "ox") {
+    const dock = $("ox-dock");
+    if (dock) dock.hidden = true;
+    document.body.classList.remove("is-guide-ox");
+  }
   renderHome();
-  if (session && view === studyView(session.mode)) renderStudyChrome(presentSession(session, Date.now()));
+  if (sessionShowsTimer(view)) renderStudyChrome(presentSession(session, Date.now()));
   else hideStudyChrome();
+  if (view === "today") renderToday();
+  if (view === "guide") renderGuide();
+  if (view === "notes") renderNotes();
+  if (view === "speed") renderSpeed();
+  if (view === "ox") renderOxDock();
   window.scrollTo(0, 0);
   requestAnimationFrame(() => window.scrollTo(0, 0));
 }
@@ -581,7 +651,7 @@ function startTicker() {
       save(stateBox.data);
       pulse(view.screen === "workDone" ? $("pom-over") : $("pom-ask"));
     }
-    if (currentView() === studyView(session.mode)) renderStudyChrome(view);
+    if (sessionShowsTimer(currentView())) renderStudyChrome(view);
     if (now - lastFlush >= 5000) {
       flushSession(now, false);
       lastFlush = now;
@@ -606,7 +676,8 @@ function armStudyGuard() {
 }
 
 function enterStudy(mode) {
-  navigateTo(studyView(mode));
+  const view = mode === "guide" ? guideSurface() : studyView(mode);
+  navigateTo(view);
   armStudyGuard();
   startTicker();
 }
@@ -650,6 +721,11 @@ function beginFromConfirm() {
   const mode = pendingEntrance;
   closeStart();
   if (!mode || session) return;
+  if (mode === "speed") {
+    speedUi = { level: "chapters", chapterId: "", topicId: "", qIndex: 0, feedback: null };
+    pickedRate = "";
+    cloze = { key: "", total: 0, open: new Set() };
+  }
   session = createSession(mode, Date.now());
   lastScreen = "";
   stateBox.data.activeSession = session;
@@ -672,11 +748,13 @@ function closeEndConfirm() {
 
 function finishSession() {
   if (!session) return;
-  const dest = pendingLeave || "home";
+  const dest = pendingLeave || (session.mode === "guide" ? "today" : "home");
   pendingLeave = null;
   stopTicker();
   flushSession(Date.now(), true);
   session = null;
+  guideHold = null;
+  pickedRate = "";
   lastScreen = "";
   closeEndConfirm();
   hideStudyChrome();
@@ -684,17 +762,626 @@ function finishSession() {
   toast("学習時間を記録しました");
 }
 
+function syncPlan() {
+  const data = stateBox.data;
+  const today = tokyoToday();
+  if (!data.log[today]) data.log[today] = { minutes: 0, questions: 0, carryMs: 0 };
+  const had = !!(data.log[today].pcs && data.log[today].pcs.date === today);
+  const plan = Pcs.ensurePlan(data, today);
+  if (!had) save(data);
+  return plan;
+}
+
+function renderKindRows(model) {
+  const list = $("kind-list");
+  if (!list) return;
+  list.replaceChildren();
+  model.rows.forEach((row) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "kind-row";
+    button.dataset.entrance = row.id;
+    button.setAttribute("aria-label", row.label + " " + row.percent + "%");
+    const name = document.createElement("span");
+    name.className = "kind-name";
+    name.textContent = row.label;
+    const track = document.createElement("span");
+    track.className = "kind-bar";
+    track.setAttribute("aria-hidden", "true");
+    const fill = document.createElement("i");
+    fill.style.width = Math.max(0, Math.min(100, row.percent)) + "%";
+    track.append(fill);
+    const pct = document.createElement("span");
+    pct.className = "kind-pct";
+    pct.textContent = row.percent + "%";
+    const chev = document.createElement("span");
+    chev.className = "kind-chev";
+    chev.setAttribute("aria-hidden", "true");
+    chev.textContent = "›";
+    button.append(name, track, pct, chev);
+    list.append(button);
+  });
+}
+
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text != null) node.textContent = text;
+  return node;
+}
+
+function currentStep() {
+  const today = tokyoToday();
+  const plan = Pcs.ensurePlan(stateBox.data, today);
+  return Pcs.nextStep(plan, todayRecord(stateBox.data).questions);
+}
+
+function guideSurface() {
+  if (guideHold) return "guide";
+  const step = currentStep();
+  if (step && step.kind === "ox") return "ox";
+  return "guide";
+}
+
+function afterPcsChange() {
+  save(stateBox.data);
+  renderHome();
+  if (!(session && session.mode === "guide")) {
+    if (currentView() === "notes") renderNotes();
+    if (currentView() === "speed") renderSpeed();
+    if (currentView() === "today") renderToday();
+    return;
+  }
+  const surface = guideSurface();
+  if (currentView() !== surface) navigateTo(surface);
+  else if (surface === "guide") renderGuide();
+  else renderOxDock();
+}
+
+function prepareCloze(key, total) {
+  if (cloze.key !== key) {
+    cloze = { key, total, open: new Set() };
+    pickedRate = "";
+  } else {
+    cloze.total = total;
+  }
+}
+
+function appendBlank(parent, answer, index) {
+  const open = cloze.open.has(index);
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "blank" + (open ? " is-open" : "");
+  button.dataset.act = "blank";
+  button.dataset.index = String(index);
+  button.textContent = open ? answer : "　";
+  button.style.minWidth = Math.max(2.4, answer.length) + "em";
+  button.setAttribute("aria-pressed", open ? "true" : "false");
+  button.setAttribute("aria-label", open ? answer : "空欄");
+  parent.append(button);
+}
+
+function appendEye(pad) {
+  const eye = el("button", "eye-btn");
+  eye.type = "button";
+  eye.dataset.act = "eye";
+  const open = cloze.total > 0 && cloze.open.size >= cloze.total;
+  eye.textContent = open ? "答えを隠す" : "答えを表示";
+  eye.setAttribute("aria-pressed", open ? "true" : "false");
+  pad.append(eye);
+}
+
+function appendStop(pad) {
+  if (!session) return;
+  const stop = el("button", "btn-quiet", "いったん終了");
+  stop.type = "button";
+  stop.dataset.act = "stop-study";
+  pad.append(stop);
+}
+
+function renderToday() {
+  const root = $("today-root");
+  if (!root) return;
+  const today = tokyoToday();
+  const plan = Pcs.ensurePlan(stateBox.data, today);
+  const questions = todayRecord(stateBox.data).questions;
+  const list = Pcs.taskList(plan, questions);
+  const model = Pcs.progress(plan, questions);
+  const step = Pcs.nextStep(plan, questions);
+  root.replaceChildren();
+  const head = el("header", "subhead");
+  head.append(el("h1", "", "今日の課題"));
+  root.append(head);
+  root.append(el("p", "lead", "この順に進みます。途中でやめても、残りから再開できます。"));
+  const overall = el("p", "task-overall");
+  overall.append(document.createTextNode("総合 "));
+  overall.append(el("b", "gold-text", model.overall + "%"));
+  root.append(overall);
+  const ol = el("ol", "task-list");
+  list.forEach((item, index) => {
+    const li = el("li", "task-item" + (item.current ? " is-current" : "") + (item.finished ? " is-done" : ""));
+    li.append(el("span", "task-no", String(index + 1)));
+    li.append(el("span", "task-label", item.label));
+    li.append(el("span", "task-status", item.status));
+    ol.append(li);
+  });
+  root.append(ol);
+  if (!step) {
+    root.append(el("p", "hint", "今日の分は終わりました。"));
+    return;
+  }
+  if (Pcs.hasResume(plan, questions)) root.append(el("p", "hint", "残りから再開します。"));
+  const begin = el("button", "cta today-begin");
+  begin.type = "button";
+  begin.dataset.act = "begin-today";
+  begin.append(el("strong", "", "はじめる"));
+  root.append(begin);
+}
+
+function renderPlaceholder(parent, step) {
+  const row = Pcs.ROWS.find((item) => item.id === step.kind);
+  parent.replaceChildren();
+  const pad = el("div", "study-pad center-pad");
+  pad.append(el("p", "eyebrow", Pcs.stepLabel(step)));
+  pad.append(el("h2", "study-title", row ? row.label : ""));
+  pad.append(el("p", "ph-badge", "準備中"));
+  pad.append(el("p", "hint center-copy", "この項目は、まだ使えません。次の課題へ進みます。"));
+  const next = el("button", "btn-gold", "次へ");
+  next.type = "button";
+  next.dataset.act = "pass-placeholder";
+  pad.append(next);
+  appendStop(pad);
+  parent.append(pad);
+}
+
+function renderNoteCard(parent, topic, meta) {
+  parent.replaceChildren();
+  const pad = el("div", "study-pad");
+  if (!topic) {
+    parent.append(pad);
+    return;
+  }
+  pad.append(el("p", "eyebrow", meta.eyebrow));
+  pad.append(el("h2", "study-title", topic.title));
+  const chips = el("div", "chip-line");
+  chips.append(el("span", "pill", meta.role === "review" ? "復習" : "新規"));
+  chips.append(el("span", "pill", "出典 " + Pcs.sourceName(topic.source)));
+  chips.append(el("span", "pill pill-dim", meta.countLabel));
+  pad.append(chips);
+  const sentence = el("p", "cloze");
+  const total = topic.parts.filter((part) => typeof part !== "string").length;
+  prepareCloze("note:" + topic.id, total);
+  let cursor = 0;
+  topic.parts.forEach((part) => {
+    if (typeof part === "string") {
+      sentence.append(document.createTextNode(part));
+      return;
+    }
+    appendBlank(sentence, part.a, cursor);
+    cursor += 1;
+  });
+  pad.append(sentence);
+  appendEye(pad);
+  const row = el("div", "rate-row");
+  ["わかった", "わからない"].forEach((label, index) => {
+    const result = index === 0 ? "known" : "unknown";
+    const button = el("button", "tbtn " + (result === "known" ? "tbtn-gold" : "tbtn-ghost"), label);
+    button.type = "button";
+    button.dataset.act = "rate-note";
+    button.dataset.result = result;
+    row.append(button);
+  });
+  pad.append(row);
+  pad.append(el("p", "hint", "理解度は明日の優先に使います。今日の達成率には、どちらの答えも同じように入ります。"));
+  appendStop(pad);
+  parent.append(pad);
+}
+
+function renderNotes() {
+  const root = $("notes-root");
+  if (!root) return;
+  const plan = Pcs.ensurePlan(stateBox.data, tokyoToday());
+  const id = plan.notes.ids.find((item) => plan.notes.done.indexOf(item) === -1);
+  if (!id) {
+    root.replaceChildren();
+    const pad = el("div", "study-pad center-pad");
+    pad.append(el("h2", "study-title", "今日のテキストまとめは終わりました"));
+    const home = el("a", "ph-back", "ホームへ戻る");
+    home.href = "#home";
+    pad.append(home);
+    appendStop(pad);
+    root.append(pad);
+    return;
+  }
+  renderNoteCard(root, Pcs.noteById(id), {
+    eyebrow: "テキストまとめ",
+    role: plan.notes.roles[id] || "new",
+    countLabel: (plan.notes.done.length + 1) + "/" + plan.notes.ids.length
+  });
+}
+
+function renderSpeedPoints(parent, topic, meta) {
+  parent.replaceChildren();
+  const pad = el("div", "study-pad");
+  if (!topic) {
+    pad.append(el("p", "hint", "論点を表示できません。"));
+    parent.append(pad);
+    return;
+  }
+  pad.append(el("p", "eyebrow", meta.eyebrow));
+  if (!meta.guide) {
+    const back = el("button", "text-back", "論点一覧へ");
+    back.type = "button";
+    back.dataset.act = "speed-back";
+    pad.append(back);
+  }
+  pad.append(el("h2", "study-title", topic.title));
+  const total = topic.points.reduce((sum, parts) => sum + parts.filter((part) => typeof part !== "string").length, 0);
+  prepareCloze("speed:" + topic.id, total);
+  const points = el("div", "point-list");
+  let cursor = 0;
+  topic.points.forEach((parts) => {
+    const line = el("p", "cloze");
+    parts.forEach((part) => {
+      if (typeof part === "string") {
+        line.append(document.createTextNode(part));
+        return;
+      }
+      appendBlank(line, part.a, cursor);
+      cursor += 1;
+    });
+    points.append(line);
+  });
+  pad.append(points);
+  appendEye(pad);
+  const go = el("button", "btn-gold", "ここから出題する");
+  go.type = "button";
+  go.dataset.act = "speed-go";
+  go.dataset.topic = topic.id;
+  pad.append(go);
+  pad.append(el("p", "hint", "理解度を選んでから出題します。選ばないときは、わかったとして進みます。"));
+  const rates = el("div", "rate-row");
+  ["わかった", "わからない"].forEach((label, index) => {
+    const result = index === 0 ? "known" : "unknown";
+    const button = el("button", "tbtn " + (result === "known" ? "tbtn-gold" : "tbtn-ghost") + (pickedRate === result ? " is-picked" : ""), label);
+    button.type = "button";
+    button.dataset.act = "pick-rate";
+    button.dataset.result = result;
+    rates.append(button);
+  });
+  pad.append(rates);
+  appendStop(pad);
+  parent.append(pad);
+}
+
+function renderChapters(parent) {
+  parent.replaceChildren();
+  const pad = el("div", "study-pad");
+  pad.append(el("p", "eyebrow", "スピードチェック"));
+  pad.append(el("h2", "study-title", "章を選ぶ"));
+  Pcs.SPEED_CHAPTERS.forEach((chapter) => {
+    const button = el("button", "nav-card");
+    button.type = "button";
+    button.dataset.act = "speed-chapter";
+    button.dataset.id = chapter.id;
+    button.append(el("span", "", chapter.title));
+    button.append(el("small", "", chapter.topics.length + "論点"));
+    pad.append(button);
+  });
+  appendStop(pad);
+  parent.append(pad);
+}
+
+function renderTopicList(parent) {
+  const chapter = Pcs.SPEED_CHAPTERS.find((item) => item.id === speedUi.chapterId) || Pcs.SPEED_CHAPTERS[0];
+  const plan = Pcs.ensurePlan(stateBox.data, tokyoToday());
+  parent.replaceChildren();
+  const pad = el("div", "study-pad");
+  const back = el("button", "text-back", "章一覧へ");
+  back.type = "button";
+  back.dataset.act = "speed-back";
+  pad.append(back);
+  pad.append(el("h2", "study-title", chapter.title));
+  chapter.topics.forEach((topic) => {
+    const button = el("button", "nav-card");
+    button.type = "button";
+    button.dataset.act = "speed-topic";
+    button.dataset.id = topic.id;
+    button.append(el("span", "", topic.title));
+    if (plan.speed.topics.indexOf(topic.id) !== -1) button.append(el("small", "", "今日"));
+    pad.append(button);
+  });
+  appendStop(pad);
+  parent.append(pad);
+}
+
+function currentBrowseQuestionId() {
+  const topic = Pcs.speedTopicById(speedUi.topicId);
+  if (!topic || !topic.questions.length) return "";
+  const index = Math.min(speedUi.qIndex, topic.questions.length - 1);
+  return topic.questions[index].id;
+}
+
+function renderQuiz(parent, qid, guide) {
+  const question = Pcs.speedQuestionById(qid);
+  const topic = Pcs.speedTopicById(Pcs.topicIdOfQuestion(qid));
+  const hold = guide ? guideHold : speedUi.feedback;
+  parent.replaceChildren();
+  const pad = el("div", "study-pad");
+  if (!question) {
+    pad.append(el("p", "hint", "問題がありません。"));
+    parent.append(pad);
+    return;
+  }
+  pad.append(el("p", "eyebrow", guide ? Pcs.stepLabel({ kind: "speed" }) : "スピードチェック"));
+  if (!guide) {
+    const back = el("button", "text-back", "要点へ");
+    back.type = "button";
+    back.dataset.act = "speed-back";
+    pad.append(back);
+  }
+  pad.append(el("h2", "study-title", topic ? topic.title : "○×"));
+  const plan = Pcs.ensurePlan(stateBox.data, tokyoToday());
+  const list = (topic ? topic.questions : []).map((item) => item.id);
+  const index = Math.max(0, list.indexOf(qid));
+  pad.append(el("p", "pill pill-dim", "○× " + (index + 1) + "/" + list.length));
+  pad.append(el("p", "quiz-prompt", question.prompt));
+  if (hold && hold.questionId === qid) {
+    pad.append(el("p", "judge " + (hold.correct ? "ok" : "ng"), hold.correct ? "正解" : "不正解"));
+    pad.append(el("p", "hint", question.explain));
+    const next = el("button", "btn-gold", "次へ");
+    next.type = "button";
+    next.dataset.act = guide ? "guide-next" : "speed-next";
+    pad.append(next);
+  } else {
+    const row = el("div", "ox-choices");
+    const yes = el("button", "choice", "○");
+    yes.type = "button";
+    yes.dataset.act = "speed-answer";
+    yes.dataset.choice = "o";
+    yes.dataset.qid = qid;
+    yes.setAttribute("aria-label", "正しい");
+    const no = el("button", "choice", "×");
+    no.type = "button";
+    no.dataset.act = "speed-answer";
+    no.dataset.choice = "x";
+    no.dataset.qid = qid;
+    no.setAttribute("aria-label", "誤り");
+    row.append(yes, no);
+    pad.append(row);
+  }
+  if (plan) appendStop(pad);
+  parent.append(pad);
+}
+
+function renderSpeed() {
+  const root = $("speed-root");
+  if (!root) return;
+  if (speedUi.level === "topics") renderTopicList(root);
+  else if (speedUi.level === "points") renderSpeedPoints(root, Pcs.speedTopicById(speedUi.topicId), { eyebrow: "スピードチェック", guide: false });
+  else if (speedUi.level === "quiz") renderQuiz(root, currentBrowseQuestionId(), false);
+  else renderChapters(root);
+}
+
+function renderAllDone(parent) {
+  const plan = Pcs.ensurePlan(stateBox.data, tokyoToday());
+  const model = Pcs.progress(plan, todayRecord(stateBox.data).questions);
+  parent.replaceChildren();
+  const pad = el("div", "study-pad center-pad");
+  pad.append(el("p", "eyebrow", "今日の課題"));
+  pad.append(el("h2", "study-title", "今日の分は終わりました"));
+  pad.append(el("p", "today-pct gold-text", model.overall + "%"));
+  const btn = el("button", "btn-gold", "終了してホームへ");
+  btn.type = "button";
+  btn.dataset.act = "finish-done";
+  pad.append(btn);
+  parent.append(pad);
+}
+
+function renderGuide() {
+  const root = $("guide-root");
+  if (!root) return;
+  if (guideHold) {
+    renderQuiz(root, guideHold.questionId, true);
+    return;
+  }
+  const step = currentStep();
+  if (!step) {
+    renderAllDone(root);
+    return;
+  }
+  if (step.kind === "ox") return;
+  if (step.placeholder) {
+    renderPlaceholder(root, step);
+    return;
+  }
+  if (step.kind === "notes") {
+    const plan = Pcs.ensurePlan(stateBox.data, tokyoToday());
+    renderNoteCard(root, Pcs.noteById(step.id), {
+      eyebrow: Pcs.stepLabel(step),
+      role: step.role,
+      countLabel: (plan.notes.done.length + 1) + "/" + plan.notes.ids.length
+    });
+    return;
+  }
+  if (step.kind === "speed" && step.type === "topic") {
+    renderSpeedPoints(root, Pcs.speedTopicById(step.id), { eyebrow: Pcs.stepLabel(step), guide: true });
+    return;
+  }
+  if (step.kind === "speed" && step.type === "question") renderQuiz(root, step.id, true);
+}
+
+function renderOxDock() {
+  const dock = $("ox-dock");
+  if (!dock) return;
+  const step = currentStep();
+  const on = !!(session && session.mode === "guide" && step && step.kind === "ox" && !guideHold);
+  dock.hidden = !on;
+  document.body.classList.toggle("is-guide-ox", on);
+  if (!on) return;
+  $("ox-dock-label").textContent = "択一対策　今日 " + step.done + "問 / 目標 " + step.target + "問。1問終えたら押します。";
+}
+
+function beginToday() {
+  if (session) return;
+  const data = stateBox.data;
+  const today = tokyoToday();
+  const plan = Pcs.ensurePlan(data, today);
+  save(data);
+  if (!Pcs.nextStep(plan, todayRecord(data).questions)) {
+    renderToday();
+    return;
+  }
+  guideHold = null;
+  pickedRate = "";
+  cloze = { key: "", total: 0, open: new Set() };
+  session = createSession("guide", Date.now());
+  lastScreen = "";
+  data.activeSession = session;
+  save(data);
+  enterStudy("guide");
+}
+
+function requestStop() {
+  if (!session) {
+    navigateTo("home");
+    return;
+  }
+  pendingLeave = session.mode === "guide" ? "today" : "home";
+  openEndConfirm();
+}
+
+function rerenderSurface() {
+  const view = currentView();
+  if (view === "guide") renderGuide();
+  else if (view === "notes") renderNotes();
+  else if (view === "speed") renderSpeed();
+}
+
+function noteOnScreen() {
+  if (session && session.mode === "guide") {
+    const step = currentStep();
+    return step && step.kind === "notes" ? step.id : "";
+  }
+  const plan = Pcs.ensurePlan(stateBox.data, tokyoToday());
+  return plan.notes.ids.find((id) => plan.notes.done.indexOf(id) === -1) || "";
+}
+
+function handleAct(node) {
+  const act = node.dataset.act;
+  if (act === "begin-today") beginToday();
+  else if (act === "finish-done") {
+    if (!session) navigateTo("home");
+    else {
+      pendingLeave = "home";
+      openEndConfirm();
+    }
+  } else if (act === "stop-study") requestStop();
+  else if (act === "blank") {
+    const index = Number(node.dataset.index);
+    if (cloze.open.has(index)) cloze.open.delete(index);
+    else cloze.open.add(index);
+    rerenderSurface();
+  } else if (act === "eye") {
+    if (!cloze.total) return;
+    if (cloze.open.size >= cloze.total) cloze.open = new Set();
+    else {
+      const next = new Set();
+      for (let i = 0; i < cloze.total; i += 1) next.add(i);
+      cloze.open = next;
+    }
+    rerenderSurface();
+  } else if (act === "rate-note") {
+    const id = noteOnScreen();
+    if (!id) return;
+    Pcs.completeNote(stateBox.data, tokyoToday(), id, node.dataset.result);
+    cloze = { key: "", total: 0, open: new Set() };
+    afterPcsChange();
+  } else if (act === "pick-rate") {
+    pickedRate = node.dataset.result || "";
+    rerenderSurface();
+  } else if (act === "speed-go") {
+    const topicId = node.dataset.topic;
+    Pcs.reviewSpeedTopic(stateBox.data, tokyoToday(), topicId, pickedRate === "unknown" ? "unknown" : "known");
+    pickedRate = "";
+    cloze = { key: "", total: 0, open: new Set() };
+    if (session && session.mode === "guide") afterPcsChange();
+    else {
+      speedUi.level = "quiz";
+      speedUi.topicId = topicId;
+      speedUi.qIndex = 0;
+      speedUi.feedback = null;
+      afterPcsChange();
+    }
+  } else if (act === "speed-answer") {
+    const qid = node.dataset.qid;
+    const question = Pcs.speedQuestionById(qid);
+    if (!question) return;
+    const pickedYes = node.dataset.choice === "o";
+    Pcs.answerSpeed(stateBox.data, tokyoToday(), qid);
+    const payload = {
+      questionId: qid,
+      correct: !!question.answer === pickedYes,
+      explain: question.explain
+    };
+    if (session && session.mode === "guide") guideHold = payload;
+    else speedUi.feedback = payload;
+    afterPcsChange();
+  } else if (act === "guide-next") {
+    guideHold = null;
+    const surface = guideSurface();
+    if (currentView() !== surface) navigateTo(surface);
+    else if (surface === "guide") renderGuide();
+    else renderOxDock();
+  } else if (act === "speed-next") {
+    speedUi.feedback = null;
+    const topic = Pcs.speedTopicById(speedUi.topicId);
+    speedUi.qIndex += 1;
+    if (!topic || speedUi.qIndex >= topic.questions.length) {
+      speedUi.level = "topics";
+      speedUi.qIndex = 0;
+    }
+    renderSpeed();
+  } else if (act === "pass-placeholder") {
+    const step = currentStep();
+    if (!step || !step.placeholder) return;
+    Pcs.passPlaceholder(stateBox.data, tokyoToday(), step.kind);
+    afterPcsChange();
+  } else if (act === "ox-one") {
+    if (!(session && session.mode === "guide")) return;
+    const result = Pcs.completeOxOne(stateBox.data, tokyoToday());
+    if (!result.changed) return;
+    afterPcsChange();
+  } else if (act === "speed-chapter") {
+    speedUi.level = "topics";
+    speedUi.chapterId = node.dataset.id;
+    speedUi.feedback = null;
+    renderSpeed();
+  } else if (act === "speed-topic") {
+    speedUi.level = "points";
+    speedUi.topicId = node.dataset.id;
+    speedUi.feedback = null;
+    pickedRate = "";
+    cloze = { key: "", total: 0, open: new Set() };
+    renderSpeed();
+  } else if (act === "speed-back") {
+    cloze = { key: "", total: 0, open: new Set() };
+    pickedRate = "";
+    speedUi.feedback = null;
+    if (speedUi.level === "quiz") speedUi.level = "points";
+    else if (speedUi.level === "points") speedUi.level = "topics";
+    else speedUi.level = "chapters";
+    renderSpeed();
+  }
+}
+
 function bind() {
   function onRoute(view) {
-    if (!session) {
-      show(view);
+    if (session && !routeAllowed(view)) {
+      promptSessionEnd();
       return;
     }
-    if (view === studyView(session.mode)) {
-      show(view);
-      return;
-    }
-    promptSessionEnd();
+    show(view);
   }
 
   window.addEventListener("hashchange", () => {
@@ -708,7 +1395,7 @@ function bind() {
       return;
     }
     const view = currentView();
-    if (view === "notes" || view === "speed" || view === "ox") {
+    if (view === "notes" || view === "speed" || view === "ox" || view === "text" || view === "workbook" || view === "guide") {
       navigateTo("home", true);
       return;
     }
@@ -721,7 +1408,7 @@ function bind() {
       if (!href.startsWith("#") || href.length < 2) return;
       event.preventDefault();
       const view = href.slice(1);
-      if (session && view !== studyView(session.mode)) {
+      if (session && !routeAllowed(view)) {
         pendingLeave = document.getElementById("view-" + view) ? view : "home";
         show(studyView(session.mode));
         openEndConfirm();
@@ -731,8 +1418,26 @@ function bind() {
     });
   });
 
-  document.querySelectorAll("[data-entrance]").forEach((button) => {
-    button.addEventListener("click", () => openStart(button.dataset.entrance));
+  document.addEventListener("click", (event) => {
+    const act = event.target.closest("[data-act]");
+    if (act) {
+      handleAct(act);
+      return;
+    }
+    const entrance = event.target.closest("[data-entrance]");
+    if (entrance && entrance.dataset.entrance) openStart(entrance.dataset.entrance);
+  });
+
+  $("start-today").addEventListener("click", () => {
+    if (session) return;
+    navigateTo("today");
+  });
+
+  $("subject-toggle").addEventListener("click", () => {
+    const panel = $("subject-panel");
+    const open = panel.hidden;
+    panel.hidden = !open;
+    $("subject-toggle").setAttribute("aria-expanded", open ? "true" : "false");
   });
 
   $("start-yes").addEventListener("click", beginFromConfirm);
@@ -817,8 +1522,13 @@ function bind() {
     if (!confirm("表示を初期のデモデータに戻しますか？")) return;
     stopTicker();
     session = null;
+    guideHold = null;
+    pickedRate = "";
     pendingLeave = null;
     closeEndConfirm();
+    const dock = $("ox-dock");
+    if (dock) dock.hidden = true;
+    document.body.classList.remove("is-guide-ox");
     hideStudyChrome();
     stateBox.data = seed();
     save(stateBox.data);
@@ -851,7 +1561,7 @@ function boot() {
     if (session.phase === "paused") session = resumeSession(session, now);
     session = tickSession(session, now);
     flushSession(now, false);
-    navigateTo(studyView(session.mode), true);
+    navigateTo(session.mode === "guide" ? guideSurface() : studyView(session.mode), true);
     armStudyGuard();
     startTicker();
   } else if (location.hash && location.hash !== "#home") {
