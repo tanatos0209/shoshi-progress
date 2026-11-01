@@ -5,7 +5,7 @@ const assert = require("node:assert/strict");
 
 global.ProgressRules = require("../js/rules.js");
 global.Pcs = require("../js/pcs.js");
-const { oxFrameUrl, queueOpensOx, OX_URL, OX_QUEUE_URL, normalizeAiSlots } = require("../js/app.js");
+const { oxFrameUrl, queueOpensOx, OX_URL, OX_QUEUE_URL, normalizeAiSlots, aiSlotsDirty } = require("../js/app.js");
 
 test("daily queue opens ox with today then review", () => {
   assert.equal(queueOpensOx("guide", "ox"), true);
@@ -31,6 +31,20 @@ test("ai support stores exactly 20 image-and-text slots", () => {
   assert.equal(slots[2].text, "");
   assert.equal(slots[19].text, "");
   assert.equal(normalizeAiSlots(null).length, 20);
+});
+
+test("ai drafts stay dirty until the twenty slots match the saved copy", () => {
+  const saved = normalizeAiSlots([{ image: "data:image/jpeg;base64,aa", text: "メモ" }]);
+  assert.equal(aiSlotsDirty(saved, saved), false);
+  const typed = normalizeAiSlots(saved);
+  typed[0].text = "追記";
+  assert.equal(aiSlotsDirty(saved, typed), true);
+  typed[0].text = "メモ";
+  typed[1].image = "data:image/png;base64,bb";
+  assert.equal(aiSlotsDirty(saved, typed), true);
+  typed[1].image = "";
+  assert.equal(aiSlotsDirty(saved, typed), false);
+  assert.equal(saved.length, 20);
 });
 
 test("home and other steps keep the bare ox home", () => {

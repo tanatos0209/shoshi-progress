@@ -17,7 +17,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&display=swap" rel="stylesheet"/>
-<link rel="stylesheet" href="css/app.css?v=10"/>
+<link rel="stylesheet" href="css/app.css?v=11"/>
 <style>html,body{background:#03150f}</style>
 </head>
 <body>
@@ -408,6 +408,16 @@
   </nav>
 </div>
 <div id="toast" role="status" aria-live="polite"></div>
+<div id="ai-discard-sheet" class="sheet" hidden>
+  <div class="sheet-card" role="dialog" aria-modal="true" aria-labelledby="ai-discard-title">
+    <h2 id="ai-discard-title">変更を破棄しますか？</h2>
+    <p class="sheet-mode">保存していない画像とメモは残しません。</p>
+    <div class="sheet-actions">
+      <button type="button" id="ai-discard-yes" class="tbtn tbtn-end">破棄する</button>
+      <button type="button" id="ai-discard-no" class="tbtn tbtn-ghost">戻る</button>
+    </div>
+  </div>
+</div>
 <div id="start-sheet" class="sheet" hidden>
   <div class="sheet-card" role="dialog" aria-modal="true" aria-labelledby="start-title">
     <h2 id="start-title">学習を始めますか？</h2>
@@ -427,8 +437,8 @@
     </div>
   </div>
 </div>
-<script src="js/rules.js?v=10"></script>
-<script src="js/pcs.js?v=10"></script>
-<script src="js/app.js?v=10"></script>
+<script src="js/rules.js?v=11"></script>
+<script src="js/pcs.js?v=11"></script>
+<script src="js/app.js?v=11"></script>
 </body>
 </html>

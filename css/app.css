@@ -1617,12 +1617,12 @@ body.is-guide-ox .ox-frame {
 .text-head,
 .ai-head {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 10px;
   margin: 0 0 14px;
 }
 
-.text-screen.has-timer.ai-screen { padding-top: 46px; }
+.text-screen.has-timer { padding-top: 46px; }
 
 .text-book {
   width: 48px;
@@ -1637,16 +1637,14 @@ body.is-guide-ox .ox-frame {
 
 .text-book svg { width: 30px; height: 30px; display: block; }
 
-.text-head-main { min-width: 0; }
-
-.text-title-row {
+.text-titles {
+  min-width: 0;
   display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: nowrap;
+  flex-direction: column;
+  justify-content: center;
 }
 
-.text-title-row h1,
+.text-titles h1,
 .ai-title {
   margin: 0;
   font-size: 26px;
@@ -1658,13 +1656,15 @@ body.is-guide-ox .ox-frame {
 
 .ai-pill {
   flex: 0 0 auto;
-  border: 1.5px solid rgba(232, 197, 106, 0.95);
-  color: #f3d98a;
-  background: transparent;
+  align-self: center;
+  border: 1px solid #fff1c4;
   border-radius: 999px;
-  padding: 5px 10px;
+  padding: 6px 12px;
+  background: linear-gradient(180deg, #faeab4 0%, #e2b44a 100%);
+  color: #3a2c0c;
+  box-shadow: 0 2px 0 #a07828;
   font: inherit;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 800;
   white-space: nowrap;
   cursor: pointer;
@@ -1822,6 +1822,8 @@ input[type="range"].text-range::-moz-range-thumb {
   padding-top: 8px;
 }
 
+.ai-pick-wrap { position: relative; }
+
 .ai-pick {
   position: relative;
   min-height: 92px;
@@ -1832,6 +1834,25 @@ input[type="range"].text-range::-moz-range-thumb {
   justify-content: center;
   overflow: hidden;
   background: #08241b;
+  cursor: pointer;
+}
+
+.ai-x {
+  position: absolute;
+  z-index: 2;
+  top: -7px;
+  right: -7px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(246, 231, 176, 0.85);
+  background: #1a1208;
+  color: #f6e7b0;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 900;
+  line-height: 1;
   cursor: pointer;
 }
 
@@ -1872,3 +1893,18 @@ input[type="range"].text-range::-moz-range-thumb {
 }
 
 .ai-memo::placeholder { color: #8fafa0; }
+
+.ai-screen { padding-bottom: 84px; }
+
+.ai-save {
+  position: fixed;
+  z-index: 18;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(480px, 100%);
+  bottom: calc(74px + env(safe-area-inset-bottom));
+  padding: 10px 14px 8px;
+  background: linear-gradient(180deg, rgba(3, 21, 15, 0), #03150f 36%);
+}
+
+.ai-save .btn-gold { margin-top: 0; }
