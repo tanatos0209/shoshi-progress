@@ -24,6 +24,17 @@ const {
 } = ProgressRules;
 
 const OX_URL = "https://tanatos0209.github.io/shoshi-ox/";
+/* Daily queue only: 今日の学習を開始, then 復習待ち. Home 択一 stays on OX_URL. */
+const OX_QUEUE_URL = "https://tanatos0209.github.io/shoshi-ox/?from=progress&start=today&scope=review";
+
+function oxFrameUrl(queue) {
+  return queue ? OX_QUEUE_URL : OX_URL;
+}
+
+function queueOpensOx(mode, stepKind) {
+  return mode === "guide" && stepKind === "ox";
+}
+
 const STORAGE_KEY = "shoshi-progress-v1";
 const DAY_LABELS = ["月", "火", "水", "木", "金", "土", "日"];
 const DEMO_HOURS = [1.5, 2.0, 1.0, 2.5, 1.5, 3.0, 2.8];
@@ -362,7 +373,7 @@ function armIframeGuard(frame) {
       if (!session || oxRelease) return;
       try {
         const href = win.location.href;
-        if (!href || href === "about:blank") win.location.replace(OX_URL);
+        if (!href || href === "about:blank") win.location.replace(oxFrameUrl(useQueueOxLink()));
         else win.history.pushState({ shoshiGuard: 1 }, "", href);
       } catch (err) { /* parent session still owns the back gesture */ }
       promptSessionEnd();
@@ -372,15 +383,23 @@ function armIframeGuard(frame) {
   }
 }
 
+function useQueueOxLink() {
+  if (!session || session.mode !== "guide") return false;
+  const step = currentStep();
+  return queueOpensOx(session.mode, step && step.kind);
+}
+
 function ensureOxFrame() {
   const frame = $("ox-frame");
   if (!frame || oxRelease) return;
+  const target = oxFrameUrl(useQueueOxLink());
   const href = oxFrameHref(frame);
-  if (frame.dataset.loaded === "1" && href.includes("shoshi-ox")) {
+  if (frame.dataset.loaded === "1" && frame.dataset.oxTarget === target && href.includes("shoshi-ox")) {
     frame.hidden = false;
     return;
   }
   frame.dataset.loaded = "1";
+  frame.dataset.oxTarget = target;
   frame.hidden = true;
   frame.onload = () => {
     if (oxRelease || frame.dataset.loaded !== "1") return;
@@ -392,7 +411,7 @@ function ensureOxFrame() {
     frame.hidden = false;
     armIframeGuard(frame);
   };
-  frame.src = OX_URL;
+  frame.src = target;
 }
 
 function releaseOxFrame() {
@@ -401,6 +420,7 @@ function releaseOxFrame() {
   oxRelease = true;
   frame.hidden = true;
   frame.dataset.loaded = "";
+  frame.dataset.oxTarget = "";
   frame.onload = null;
   if (frame.getAttribute("src")) frame.src = "about:blank";
 }
@@ -1583,4 +1603,13 @@ function boot() {
   }, 30000);
 }
 
-boot();
+if (typeof document !== "undefined") boot();
+
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = {
+    oxFrameUrl,
+    queueOpensOx,
+    OX_URL,
+    OX_QUEUE_URL
+  };
+}
