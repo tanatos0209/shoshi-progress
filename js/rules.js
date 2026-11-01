@@ -9,7 +9,10 @@ const ProgressRules = (function () {
   const ENTRANCES = {
     notes: "テキストまとめ",
     ox: "択一対策",
-    speed: "スピードチェック"
+    speed: "スピードチェック",
+    text: "テキスト",
+    workbook: "問題集",
+    guide: "今日のノルマ"
   };
   const PHASES = ["work", "paused", "workDone", "break", "breakDone"];
 
