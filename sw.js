@@ -1,10 +1,10 @@
-const CACHE = "shoshi-progress-v3";
+const CACHE = "shoshi-progress-v4";
 const SHELL = [
   "./",
   "./index.html",
-  "./css/app.css",
-  "./js/rules.js",
-  "./js/app.js",
+  "./css/app.css?v=4",
+  "./js/rules.js?v=4",
+  "./js/app.js?v=4",
   "./manifest.webmanifest",
   "./favicon.ico",
   "./favicon-32.png",
@@ -34,15 +34,25 @@ self.addEventListener("fetch", (event) => {
   if (req.method !== "GET") return;
   const url = new URL(req.url);
   if (url.origin !== location.origin) return;
-  event.respondWith(
-    fetch(req)
-      .then((res) => {
-        if (res.ok) {
-          const copy = res.clone();
-          caches.open(CACHE).then((cache) => cache.put(req, copy));
-        }
-        return res;
-      })
-      .catch(() => caches.match(req).then((cached) => cached || caches.match("./index.html")))
-  );
+  const scopePath = new URL(self.registration.scope).pathname;
+  if (!url.pathname.startsWith(scopePath)) return;
+  event.respondWith((async () => {
+    try {
+      const fresh = await fetch(req, { cache: "no-store" });
+      if (fresh && fresh.ok) {
+        const copy = fresh.clone();
+        caches.open(CACHE).then((cache) => cache.put(req, copy)).catch(() => {});
+        return fresh;
+      }
+    } catch (err) {
+      /* offline or a navigation fetch Safari rejects */
+    }
+    const cached = await caches.match(req);
+    if (cached) return cached;
+    if (req.mode === "navigate") {
+      const shell = await caches.match("./index.html");
+      if (shell) return shell;
+    }
+    return new Response("", { status: 504, statusText: "Offline" });
+  })());
 });

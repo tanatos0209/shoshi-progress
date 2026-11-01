@@ -45,6 +45,16 @@ a, button { touch-action: manipulation; -webkit-tap-highlight-color: transparent
 
 .view[hidden] { display: none !important; }
 
+.view.is-on { display: block !important; }
+
+.view.is-on.stack { display: flex !important; }
+
+.study-view {
+  position: relative;
+  min-height: calc(100svh - 74px);
+  background: #03150f;
+}
+
 .stack { display: flex; flex-direction: column; gap: 12px; }
 
 .top {
@@ -1043,9 +1053,11 @@ body.is-timing .content {
   position: fixed;
   inset: 0;
   z-index: 70;
-  display: grid;
-  place-items: center;
-  padding: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100svh;
+  padding: calc(16px + env(safe-area-inset-top)) 16px calc(16px + env(safe-area-inset-bottom));
   background: rgba(0, 0, 0, 0.62);
 }
 
@@ -1126,12 +1138,42 @@ body.is-ox .content {
   padding: 0 0 calc(74px + env(safe-area-inset-bottom));
 }
 
+.ox-view {
+  min-height: calc(100svh - 74px);
+  background: #03150f;
+}
+
+.ox-fallback {
+  min-height: calc(100svh - 90px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 28px 16px 80px;
+  text-align: center;
+}
+
+.ox-fallback h2 {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 900;
+}
+
+.ox-fallback p {
+  margin: 0;
+  color: #f3ecdf;
+  font-size: 14px;
+}
+
 .ox-frame {
-  display: block;
+  position: absolute;
+  z-index: 1;
+  inset: 0;
   width: 100%;
-  height: calc(100dvh - 74px - env(safe-area-inset-bottom));
+  height: 100%;
   border: 0;
-  background: #121418;
+  background: #0d2318;
 }
 
 .measure-badge {
