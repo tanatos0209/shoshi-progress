@@ -96,11 +96,20 @@ function loadAiSlots(scope) {
   }
 }
 
+let cloudQuiet = false;
+
+function notifyCloud(kind, payload) {
+  if (cloudQuiet) return;
+  if (typeof window === "undefined" || !window.ShoshiSync || !window.ShoshiSync.noteLocal) return;
+  window.ShoshiSync.noteLocal(kind, payload);
+}
+
 function saveAiSlots(slots, scope) {
   const which = scope === "workbook" ? "workbook" : "text";
   aiSaved[which] = normalizeAiSlots(slots);
   try {
     localStorage.setItem(aiStorageKey(which), JSON.stringify(aiSaved[which]));
+    notifyCloud(which === "workbook" ? "ai-workbook" : "ai-text", aiSaved[which]);
     return true;
   } catch (err) {
     return false;
@@ -154,6 +163,9 @@ function confirmDiscardAi() {
   const action = pendingAiLeave;
   pendingAiLeave = null;
   $("ai-discard-sheet").hidden = true;
+  if (window.ShoshiSync && window.ShoshiSync.recheck) {
+    window.ShoshiSync.recheck(aiScope === "workbook" ? "ai-workbook" : "ai-text");
+  }
   if (action) action();
 }
 
@@ -314,6 +326,7 @@ function save(data) {
   } catch (err) {
     /* private mode */
   }
+  notifyCloud("state", data);
 }
 
 function todayRecord(data) {
@@ -2057,6 +2070,102 @@ function bind() {
   });
 }
 
+function refreshAfterCloud() {
+  const view = currentView();
+  renderHome();
+  if (view === "record") fillRecord();
+  if (view === "settings") fillSettings();
+  const editingAi = textPanel === "ai" && aiDirty;
+  if (view === "today") renderToday();
+  if (view === "guide" && !editingAi) renderGuide();
+  if (view === "notes") renderNotes();
+  if (view === "speed") renderSpeed();
+  if (view === "text" && !editingAi) renderRangeInto($("text-root"), "text");
+  if (view === "workbook" && !editingAi) renderRangeInto($("workbook-root"), "workbook");
+  if (view === "ox") renderOxDock();
+  if (sessionShowsTimer(view)) renderStudyChrome(presentSession(session, Date.now()));
+  else if (!session) hideStudyChrome();
+}
+
+function adoptCloudSession(data) {
+  const next = data.activeSession;
+  if (next) {
+    session = next;
+    const now = Date.now();
+    if (session.phase === "paused") session = resumeSession(session, now);
+    session = tickSession(session, now);
+    data.activeSession = session;
+    if (!ticker) startTicker();
+  } else if (session) {
+    session = null;
+    stopTicker();
+    guideHold = null;
+    hideStudyChrome();
+    const dock = $("ox-dock");
+    if (dock) dock.hidden = true;
+    document.body.classList.remove("is-guide-ox");
+    data.activeSession = null;
+  }
+}
+
+function applyCloudState(raw) {
+  const data = normalize(raw);
+  settle(data);
+  cloudQuiet = true;
+  try {
+    save(data);
+    adoptCloudSession(data);
+    save(data);
+  } finally {
+    cloudQuiet = false;
+  }
+  const view = currentView();
+  if (session && !routeAllowed(view)) {
+    const target = session.mode === "guide" ? guideSurface() : studyView(session.mode);
+    navigateTo(target, true);
+  } else {
+    refreshAfterCloud();
+  }
+  return true;
+}
+
+function applyCloudAi(scope, slots) {
+  const which = scope === "workbook" ? "workbook" : "text";
+  if (textPanel === "ai" && aiScope === which && aiDirty) return false;
+  aiSaved[which] = normalizeAiSlots(slots);
+  try {
+    localStorage.setItem(aiStorageKey(which), JSON.stringify(aiSaved[which]));
+  } catch (err) {
+    /* private mode */
+  }
+  if (textPanel === "ai" && aiScope === which) {
+    aiDraft = normalizeAiSlots(aiSaved[which]);
+    aiDirty = false;
+    rerenderRangeSurface();
+  }
+  return true;
+}
+
+function startCloud() {
+  if (typeof window === "undefined" || !window.ShoshiSync || !window.ShoshiSync.start) return;
+  window.ShoshiSync.start({
+    getState: () => stateBox.data,
+    getAi: (scope) => ensureAiSlots(scope),
+    aiDirty: (scope) => {
+      const which = scope === "workbook" ? "workbook" : "text";
+      return textPanel === "ai" && aiScope === which && aiDirty;
+    },
+    aiDirtyAny: () => textPanel === "ai" && aiDirty,
+    applyState: applyCloudState,
+    applyAi: applyCloudAi,
+    toast: toast,
+    openSettings: () => {
+      if ((location.hash || "") !== "#settings") location.hash = "#settings";
+      else show("settings");
+    }
+  });
+}
+
 function boot() {
   stateBox.data = load();
   document.querySelectorAll('a[data-external="ox"]').forEach((node) => {
@@ -2089,6 +2198,7 @@ function boot() {
   setInterval(() => {
     if (!session) renderHome();
   }, 30000);
+  startCloud();
 }
 
 if (typeof document !== "undefined") boot();

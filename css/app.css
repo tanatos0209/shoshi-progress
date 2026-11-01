@@ -81,9 +81,73 @@ a, button { touch-action: manipulation; -webkit-tap-highlight-color: transparent
 
 .top h1 {
   margin: 0;
+  flex: 1;
+  min-width: 0;
   font-size: 26px;
   font-weight: 900;
   letter-spacing: 0.04em;
+}
+
+.sync-chip {
+  margin-left: auto;
+  max-width: 42%;
+  border: 1px solid var(--line);
+  background: #0c2a1c;
+  color: var(--gold);
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sync-chip[data-state="ok"] { color: #f6e7b0; }
+
+.sync-chip[data-state="offline"],
+.sync-chip[data-state="unconfigured"],
+.sync-chip[data-state="error"] { color: var(--dim); }
+
+.sync-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 900;
+}
+
+.sync-status {
+  margin: 8px 0 0;
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--gold);
+}
+
+.sync-account {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--dim);
+}
+
+.sync-card .btn-gold {
+  gap: 8px;
+}
+
+.sync-card .btn-gold:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.g-mark {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #fff;
+  color: #3a2c0c;
+  font-weight: 900;
+  font-size: 14px;
 }
 
 .card {
