@@ -1,11 +1,11 @@
-const CACHE = "shoshi-progress-v11";
+const CACHE = "shoshi-progress-v12";
 const SHELL = [
   "./",
   "./index.html",
-  "./css/app.css?v=11",
-  "./js/rules.js?v=11",
-  "./js/pcs.js?v=11",
-  "./js/app.js?v=11",
+  "./css/app.css?v=12",
+  "./js/rules.js?v=12",
+  "./js/pcs.js?v=12",
+  "./js/app.js?v=12",
   "./manifest.webmanifest",
   "./favicon.ico",
   "./favicon-32.png",

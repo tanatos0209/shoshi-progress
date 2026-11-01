@@ -17,7 +17,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&display=swap" rel="stylesheet"/>
-<link rel="stylesheet" href="css/app.css?v=11"/>
+<link rel="stylesheet" href="css/app.css?v=12"/>
 <style>html,body{background:#03150f}</style>
 </head>
 <body>
@@ -184,18 +184,7 @@
     </section>
 
     <section id="view-workbook" class="view study-view" hidden>
-      <div class="ph">
-        <div class="ph-mark" aria-hidden="true">
-          <svg viewBox="0 0 48 48">
-            <path fill="#F0D078" d="M10 8h20l8 8v24H10z"/>
-            <path fill="#fff6d4" d="M30 8v8h8"/>
-          </svg>
-        </div>
-        <h2>問題集</h2>
-        <p class="ph-badge">準備中</p>
-        <p>問題集の画面は、これからこの中に追加します。</p>
-        <a class="ph-back" href="#home">ホームへ戻る</a>
-      </div>
+      <div id="workbook-root"></div>
     </section>
 
     <section id="view-ox" class="view study-view ox-view" hidden>
@@ -263,7 +252,7 @@
             <path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3"/>
           </svg>
         </div>
-        <h2>パーフェクトコントロール</h2>
+        <h2>PCS</h2>
         <p class="ph-badge">準備中</p>
         <p>弱点の洗い出しは、これから追加します。</p>
       </div>
@@ -387,7 +376,7 @@
         <circle cx="12" cy="12" r="2.4"/>
         <path d="M12 2.6v2.6M12 18.8v2.6M2.6 12h2.6M18.8 12h2.6"/>
       </svg>
-      <span class="wrap">パーフェクト<br>コントロール</span>
+      <span>PCS</span>
       <i></i>
     </a>
     <a class="tab" href="#calendar" data-tab="calendar">
@@ -437,8 +426,8 @@
     </div>
   </div>
 </div>
-<script src="js/rules.js?v=11"></script>
-<script src="js/pcs.js?v=11"></script>
-<script src="js/app.js?v=11"></script>
+<script src="js/rules.js?v=12"></script>
+<script src="js/pcs.js?v=12"></script>
+<script src="js/app.js?v=12"></script>
 </body>
 </html>
