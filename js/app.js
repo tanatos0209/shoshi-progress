@@ -6,6 +6,7 @@ const {
   addDays,
   weekdayMon0,
   mondayOf,
+  weekLogMinutes,
   formatJPDate,
   formatExamDate,
   computeExamDate,
@@ -185,12 +186,8 @@ function weekSeries(data) {
       label: hours.toFixed(1) + "h"
     }));
   }
-  const today = tokyoToday();
-  const mon = mondayOf(today);
-  const minutes = DAY_LABELS.map((_, index) => {
-    const rec = data.log[addDays(mon, index)];
-    return rec ? Math.max(0, Math.round(Number(rec.minutes) || 0)) : 0;
-  });
+  /* This Monday 00:00–Sunday in Asia/Tokyo. Last week's log rows stay stored. */
+  const minutes = weekLogMinutes(data.log, tokyoToday());
   return minutes.map((min, index) => {
     const hours = min / 60;
     return {
@@ -233,12 +230,7 @@ function renderHome() {
     $("sum-h").textContent = "12";
     $("sum-m").textContent = "30";
   } else {
-    const mon = mondayOf(today);
-    let total = 0;
-    for (let i = 0; i < 7; i += 1) {
-      const row = data.log[addDays(mon, i)];
-      total += row ? Math.max(0, Math.round(Number(row.minutes) || 0)) : 0;
-    }
+    const total = weekLogMinutes(data.log, today).reduce((sum, min) => sum + min, 0);
     $("sum-h").textContent = String(Math.floor(total / 60));
     $("sum-m").textContent = String(total % 60);
   }

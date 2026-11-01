@@ -21,6 +21,29 @@ test("first Sunday of July and the day-after rollover", () => {
   assert.equal(new Date(R.computeExamDate("2026-11-01") + "T00:00:00Z").getUTCDay(), 0);
 });
 
+test("this week is Monday 00:00 Asia/Tokyo through Sunday and does not delete older logs", () => {
+  assert.equal(R.tokyoToday(Date.parse("2026-11-01T14:59:00Z")), "2026-11-01");
+  assert.equal(R.tokyoToday(Date.parse("2026-11-01T15:00:00Z")), "2026-11-02");
+  assert.deepEqual(R.weekDates("2026-11-01"), [
+    "2026-10-26", "2026-10-27", "2026-10-28", "2026-10-29", "2026-10-30", "2026-10-31", "2026-11-01"
+  ]);
+  assert.deepEqual(R.weekDates("2026-11-02"), [
+    "2026-11-02", "2026-11-03", "2026-11-04", "2026-11-05", "2026-11-06", "2026-11-07", "2026-11-08"
+  ]);
+
+  const log = {
+    "2026-10-26": { minutes: 40 },
+    "2026-11-01": { minutes: 90 },
+    "2026-11-02": { minutes: 15 }
+  };
+  const sunday = R.weekLogMinutes(log, "2026-11-01");
+  assert.deepEqual(sunday, [40, 0, 0, 0, 0, 0, 90]);
+  const monday = R.weekLogMinutes(log, "2026-11-02");
+  assert.deepEqual(monday, [15, 0, 0, 0, 0, 0, 0]);
+  assert.equal(log["2026-11-01"].minutes, 90);
+  assert.equal(log["2026-10-26"].minutes, 40);
+});
+
 test("streak starts at 0 and ignores opening the app", () => {
   const data = { log: {}, streak: 99, lastStudyDate: "2026-11-01" };
   assert.equal(R.syncStreak(data, "2026-11-01"), 0);
