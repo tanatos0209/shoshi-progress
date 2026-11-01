@@ -115,12 +115,22 @@ test("text quota is one line and confirmed pages can move again", () => {
   assert.equal(plan.text.read, 19);
   assert.equal(Pcs.progress(plan, 0).rows.find((row) => row.id === "text").percent, 100);
   assert.equal(Pcs.nextStep(plan, 0).kind, "workbook");
-  assert.equal(Pcs.nextStep(plan, 0).placeholder, true);
+  assert.equal(Pcs.nextStep(plan, 0).placeholder, undefined);
   const before = Pcs.progress(plan, 0).overall;
-  const passed = Pcs.passPlaceholder(data, "2026-11-01", "workbook");
-  assert.equal(passed.changed, true);
-  assert.equal(passed.progress.rows.find((row) => row.id === "workbook").percent, 0);
+  const skipped = Pcs.passPlaceholder(data, "2026-11-01", "workbook");
+  assert.equal(skipped.changed, false);
   assert.equal(Pcs.progress(plan, 0).overall, before);
+  const partialBook = Pcs.confirmWorkbookSolved(data, "2026-11-01", 10);
+  assert.equal(partialBook.changed, true);
+  assert.equal(plan.workbook.solved, 10);
+  assert.equal(partialBook.progress.rows.find((row) => row.id === "workbook").percent, Math.round((10 / 19) * 100));
+  assert.equal(Pcs.nextStep(plan, 0).kind, "workbook");
+  const lowerBook = Pcs.confirmWorkbookSolved(data, "2026-11-01", 4);
+  assert.equal(lowerBook.changed, true);
+  assert.equal(plan.workbook.solved, 4);
+  assert.equal(Pcs.confirmWorkbookSolved(data, "2026-11-01", 99).changed, true);
+  assert.equal(plan.workbook.solved, 19);
+  assert.equal(Pcs.progress(plan, 0).rows.find((row) => row.id === "workbook").percent, 100);
   assert.equal(Pcs.nextStep(plan, 0).kind, "notes");
   assert.equal(plan.notes.roles[plan.notes.ids[0]], "new");
 });
@@ -129,7 +139,7 @@ test("one note, one ox question, and one speed action do not finish the day", ()
   const data = dataOn("2026-11-01");
   const plan = Pcs.ensurePlan(data, "2026-11-01");
   Pcs.confirmTextPages(data, "2026-11-01", 19);
-  Pcs.passPlaceholder(data, "2026-11-01", "workbook");
+  Pcs.confirmWorkbookSolved(data, "2026-11-01", 19);
   const note = Pcs.nextStep(plan, 0);
   const afterNote = Pcs.completeNote(data, "2026-11-01", note.id, "known");
   assert.equal(afterNote.changed, true);
@@ -280,4 +290,33 @@ test("starter speed sample is chapter 1 自然人の能力", () => {
   assert.equal(Pcs.speedQuestionById("cap:2").answer, false);
   assert.equal(Pcs.stepLabel({ kind: "notes" }), "3/5 テキストまとめ");
   assert.equal(Pcs.stepLabel({ kind: "text" }), "1/5 テキスト");
+  assert.equal(Pcs.stepLabel({ kind: "workbook" }), "2/5 問題集");
+});
+
+test("workbook quota is one problem span and solved count feeds the average", () => {
+  const data = dataOn("2026-11-01");
+  const plan = Pcs.ensurePlan(data, "2026-11-01");
+  assert.equal(plan.workbook.subject, "不動産登記法 I");
+  assert.equal(plan.workbook.subtitle, "合格ゾーン択一");
+  assert.equal(plan.workbook.count, 19);
+  assert.equal(Pcs.workbookQuotaLine(plan.workbook), "不動産登記法 I 問1–19（19問）");
+  assert.equal(Pcs.workbookRangeLabel(plan.workbook), "問 1 – 19");
+  assert.equal(Pcs.workbookMetaLine(plan.workbook), "不動産登記法 I ・ 19問");
+  assert.equal(Pcs.workbookCountLabel(10, 19), "10/19問");
+  assert.equal(Pcs.workbookQuotaLine(plan.workbook).includes("紙の"), false);
+  assert.equal(Pcs.workbookQuotaLine(plan.workbook).includes("章"), false);
+  assert.equal(Pcs.taskList(plan, 0).find((item) => item.id === "workbook").status, "0/19");
+  Pcs.confirmTextPages(data, "2026-11-01", 19);
+  Pcs.confirmWorkbookSolved(data, "2026-11-01", 10);
+  const model = Pcs.progress(plan, 0);
+  assert.equal(model.rows.find((row) => row.id === "workbook").percent, Math.round((10 / 19) * 100));
+  assert.equal(model.overall, Math.round((100 + (10 / 19) * 100 + 0 + 0 + 0) / 5));
+  const bare = {
+    seen: { workbook: false },
+    notes: { ids: ["a"], roles: {}, done: [] },
+    ox: { target: 1 },
+    speed: { topics: [], questions: [], reviewed: [], answered: [] }
+  };
+  assert.equal(Pcs.progress(bare, 0).rows.find((row) => row.id === "workbook").percent, 0);
+  assert.equal(Pcs.nextStep(bare, 0).placeholder, true);
 });

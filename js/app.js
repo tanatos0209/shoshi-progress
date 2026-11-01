@@ -55,12 +55,20 @@ let pickedRate = "";
 let cloze = { key: "", total: 0, open: new Set() };
 let speedUi = { level: "chapters", chapterId: "", topicId: "", qIndex: 0, feedback: null };
 let textPanel = "read";
-let aiSlots = null;
+let aiScope = "text";
+let aiSaved = { text: null, workbook: null };
 let aiDraft = null;
 let aiDirty = false;
 let pendingAiLeave = null;
-const AI_KEY = "shoshi-progress-ai-v1";
+const AI_KEYS = {
+  text: "shoshi-progress-ai-v1",
+  workbook: "shoshi-progress-ai-workbook-v1"
+};
 const AI_SLOT_COUNT = 20;
+
+function aiStorageKey(scope) {
+  return scope === "workbook" ? AI_KEYS.workbook : AI_KEYS.text;
+}
 
 function cleanAiImage(value) {
   if (typeof value !== "string" || value.indexOf("data:image/") !== 0) return "";
@@ -80,27 +88,29 @@ function normalizeAiSlots(raw) {
   return slots;
 }
 
-function loadAiSlots() {
+function loadAiSlots(scope) {
   try {
-    return normalizeAiSlots(JSON.parse(localStorage.getItem(AI_KEY) || "null"));
+    return normalizeAiSlots(JSON.parse(localStorage.getItem(aiStorageKey(scope)) || "null"));
   } catch (err) {
     return normalizeAiSlots(null);
   }
 }
 
-function saveAiSlots(slots) {
-  aiSlots = normalizeAiSlots(slots);
+function saveAiSlots(slots, scope) {
+  const which = scope === "workbook" ? "workbook" : "text";
+  aiSaved[which] = normalizeAiSlots(slots);
   try {
-    localStorage.setItem(AI_KEY, JSON.stringify(aiSlots));
+    localStorage.setItem(aiStorageKey(which), JSON.stringify(aiSaved[which]));
     return true;
   } catch (err) {
     return false;
   }
 }
 
-function ensureAiSlots() {
-  if (!aiSlots) aiSlots = loadAiSlots();
-  return aiSlots;
+function ensureAiSlots(scope) {
+  const which = scope === "workbook" ? "workbook" : "text";
+  if (!aiSaved[which]) aiSaved[which] = loadAiSlots(which);
+  return aiSaved[which];
 }
 
 function aiSlotsDirty(saved, draft) {
@@ -113,12 +123,12 @@ function aiSlotsDirty(saved, draft) {
 }
 
 function syncAiDirty() {
-  aiDirty = aiSlotsDirty(ensureAiSlots(), aiDraft);
+  aiDirty = aiSlotsDirty(ensureAiSlots(aiScope), aiDraft);
 }
 
 function aiHostView() {
   if (session && session.mode === "guide") return "guide";
-  return "text";
+  return aiScope === "workbook" ? "workbook" : "text";
 }
 
 function discardSheetOpen() {
@@ -139,7 +149,7 @@ function requestLeaveAi(action) {
 }
 
 function confirmDiscardAi() {
-  aiDraft = normalizeAiSlots(ensureAiSlots());
+  aiDraft = normalizeAiSlots(ensureAiSlots(aiScope));
   aiDirty = false;
   const action = pendingAiLeave;
   pendingAiLeave = null;
@@ -570,13 +580,17 @@ function show(view) {
     today: "今日の課題",
     guide: "今日の課題",
     record: "記録する",
-    perfect: "パーフェクトコントロール",
+    perfect: "PCS",
     calendar: "カレンダー",
     settings: "設定",
     ox: "択一対策"
   };
   document.title = view === "home" ? "進捗管理" : titles[view] + " | 進捗管理";
-  if (view !== "text" && view !== "guide") {
+  if (view !== "text" && view !== "workbook" && view !== "guide") {
+    textPanel = "read";
+    aiDraft = null;
+    aiDirty = false;
+  } else if (textPanel === "ai" && view !== aiHostView()) {
     textPanel = "read";
     aiDraft = null;
     aiDirty = false;
@@ -595,7 +609,8 @@ function show(view) {
   if (view === "guide") renderGuide();
   if (view === "notes") renderNotes();
   if (view === "speed") renderSpeed();
-  if (view === "text") renderTextInto($("text-root"));
+  if (view === "text") renderRangeInto($("text-root"), "text");
+  if (view === "workbook") renderRangeInto($("workbook-root"), "workbook");
   if (view === "ox") renderOxDock();
   window.scrollTo(0, 0);
   requestAnimationFrame(() => window.scrollTo(0, 0));
@@ -855,7 +870,11 @@ function beginFromConfirm() {
     pickedRate = "";
     cloze = { key: "", total: 0, open: new Set() };
   }
-  if (mode === "text") textPanel = "read";
+  if (mode === "text" || mode === "workbook") {
+    textPanel = "read";
+    aiDraft = null;
+    aiDirty = false;
+  }
   session = createSession(mode, Date.now());
   lastScreen = "";
   stateBox.data.activeSession = session;
@@ -969,7 +988,8 @@ function afterPcsChange() {
     if (currentView() === "notes") renderNotes();
     if (currentView() === "speed") renderSpeed();
     if (currentView() === "today") renderToday();
-    if (currentView() === "text") renderTextInto($("text-root"));
+    if (currentView() === "text") renderRangeInto($("text-root"), "text");
+    if (currentView() === "workbook") renderRangeInto($("workbook-root"), "workbook");
     return;
   }
   const surface = guideSurface();
@@ -1032,51 +1052,92 @@ function paintTextRange(input) {
   input.style.setProperty("--fill", pct + "%");
 }
 
-function renderTextRead(parent) {
+const RANGE_SCREENS = {
+  text: {
+    scope: "text",
+    title: "テキスト",
+    subtitle: () => "Vマジック",
+    quota: (item) => Pcs.textQuotaLine(item),
+    range: (item) => Pcs.textRangeLabel(item),
+    meta: (item) => Pcs.textMetaLine(item),
+    count: (value, total) => Pcs.textCountLabel(value, total),
+    total: (item) => item.pages,
+    value: (item) => item.read,
+    sliderLabel: "読んだページ",
+    confirmLabel: "この範囲を読んだ",
+    toast: "読んだページを記録しました"
+  },
+  workbook: {
+    scope: "workbook",
+    title: "問題集",
+    subtitle: (item) => (item && item.subtitle) || "合格ゾーン択一",
+    quota: (item) => Pcs.workbookQuotaLine(item),
+    range: (item) => Pcs.workbookRangeLabel(item),
+    meta: (item) => Pcs.workbookMetaLine(item),
+    count: (value, total) => Pcs.workbookCountLabel(value, total),
+    total: (item) => item.count,
+    value: (item) => item.solved,
+    sliderLabel: "解いた問題数",
+    confirmLabel: "この範囲を解いた",
+    toast: "解いた問題数を記録しました"
+  }
+};
+
+function rangeSpec(kind) {
+  return kind === "workbook" ? RANGE_SCREENS.workbook : RANGE_SCREENS.text;
+}
+
+function rangeItem(kind) {
   const plan = Pcs.ensurePlan(stateBox.data, tokyoToday());
-  const item = plan.text;
-  const pages = item.pages;
+  return kind === "workbook" ? plan.workbook : plan.text;
+}
+
+function renderRangeScreen(parent, kind) {
+  const spec = rangeSpec(kind);
+  const item = rangeItem(spec.scope);
+  const total = spec.total(item);
   const screen = el("div", "text-screen" + (sessionShowsTimer(currentView()) ? " has-timer" : ""));
   const head = el("header", "text-head");
   head.append(bookMark());
   const main = el("div", "text-titles");
-  main.append(el("h1", "", "テキスト"));
-  main.append(el("p", "text-source", "Vマジック"));
+  main.append(el("h1", "", spec.title));
+  main.append(el("p", "text-source", spec.subtitle(item)));
   const ai = el("button", "ai-pill", "AIサポート");
   ai.type = "button";
   ai.dataset.act = "open-ai";
+  ai.dataset.scope = spec.scope;
   head.append(main, ai);
   screen.append(head);
 
   const quota = el("section", "card text-quota-card");
   quota.append(el("p", "text-kicker", "今日のノルマ"));
-  quota.append(el("p", "text-quota", Pcs.textQuotaLine(item)));
+  quota.append(el("p", "text-quota", spec.quota(item)));
   screen.append(quota);
 
   const rangeCard = el("section", "card text-range-card");
   rangeCard.append(el("p", "text-kicker", "今日の範囲"));
-  rangeCard.append(el("p", "text-span", Pcs.textRangeLabel(item)));
-  rangeCard.append(el("p", "text-meta", Pcs.textMetaLine(item)));
+  rangeCard.append(el("p", "text-span", spec.range(item)));
+  rangeCard.append(el("p", "text-meta", spec.meta(item)));
   const range = document.createElement("input");
   range.type = "range";
   range.className = "text-range";
-  range.id = "text-read";
   range.min = "0";
-  range.max = String(pages);
+  range.max = String(total);
   range.step = "1";
-  range.value = String(item.read);
-  range.setAttribute("aria-label", "読んだページ");
-  const count = el("p", "text-pages", Pcs.textCountLabel(item.read, pages));
+  range.value = String(spec.value(item));
+  range.setAttribute("aria-label", spec.sliderLabel);
+  const count = el("p", "text-pages", spec.count(spec.value(item), total));
   range.addEventListener("input", () => {
-    count.textContent = Pcs.textCountLabel(range.value, pages);
+    count.textContent = spec.count(range.value, total);
     paintTextRange(range);
   });
   rangeCard.append(range);
   rangeCard.append(count);
   paintTextRange(range);
-  const done = el("button", "btn-gold", "この範囲を読んだ");
+  const done = el("button", "btn-gold", spec.confirmLabel);
   done.type = "button";
-  done.dataset.act = "confirm-text";
+  done.dataset.act = "confirm-range";
+  done.dataset.kind = spec.scope;
   const home = el("button", "text-home", "ホームへ戻る");
   home.type = "button";
   home.dataset.act = "text-home";
@@ -1116,44 +1177,45 @@ function fileToImage(file) {
   });
 }
 
-function rerenderTextSurface() {
+function rerenderRangeSurface() {
   const view = currentView();
-  if (view === "text") renderTextInto($("text-root"));
+  if (view === "text") renderRangeInto($("text-root"), "text");
+  else if (view === "workbook") renderRangeInto($("workbook-root"), "workbook");
   else if (view === "guide") renderGuide();
 }
 
 function storeSlotImage(index, file) {
-  if (!aiDraft) aiDraft = normalizeAiSlots(ensureAiSlots());
+  if (!aiDraft) aiDraft = normalizeAiSlots(ensureAiSlots(aiScope));
   fileToImage(file).then((url) => {
     if (!aiDraft[index]) return;
     aiDraft[index].image = url;
     syncAiDirty();
-    rerenderTextSurface();
+    rerenderRangeSurface();
   }).catch(() => {
     toast("画像ファイルを選んでください");
   });
 }
 
 function commitAiDraft() {
-  if (!aiDraft) aiDraft = normalizeAiSlots(ensureAiSlots());
-  if (!saveAiSlots(aiDraft)) {
+  if (!aiDraft) aiDraft = normalizeAiSlots(ensureAiSlots(aiScope));
+  if (!saveAiSlots(aiDraft, aiScope)) {
     toast("この端末に保存できませんでした");
     return;
   }
-  aiDraft = normalizeAiSlots(aiSlots);
+  aiDraft = normalizeAiSlots(aiSaved[aiScope === "workbook" ? "workbook" : "text"]);
   aiDirty = false;
   toast("変更を保存しました");
 }
 
 function renderAiSupport(parent) {
-  if (!aiDraft) aiDraft = normalizeAiSlots(ensureAiSlots());
+  if (!aiDraft) aiDraft = normalizeAiSlots(ensureAiSlots(aiScope));
   const slots = aiDraft;
   const screen = el("div", "text-screen ai-screen" + (sessionShowsTimer(currentView()) ? " has-timer" : ""));
   const head = el("header", "ai-head");
   const back = el("button", "ai-back", "‹");
   back.type = "button";
   back.dataset.act = "back-text";
-  back.setAttribute("aria-label", "テキストへ戻る");
+  back.setAttribute("aria-label", aiScope === "workbook" ? "問題集へ戻る" : "テキストへ戻る");
   head.append(back);
   head.append(el("h1", "ai-title", "AIサポート"));
   head.append(el("p", "ai-count", "20枠"));
@@ -1223,10 +1285,10 @@ function renderAiSupport(parent) {
   parent.replaceChildren(screen);
 }
 
-function renderTextInto(parent) {
+function renderRangeInto(parent, kind) {
   if (!parent) return;
   if (textPanel === "ai") renderAiSupport(parent);
-  else renderTextRead(parent);
+  else renderRangeScreen(parent, kind);
 }
 
 function leaveTextHome() {
@@ -1550,11 +1612,13 @@ function renderGuide() {
     return;
   }
   if (step.kind === "ox") return;
-  if (step.kind === "text" && !step.placeholder) {
-    renderTextInto(root);
+  if ((step.kind === "text" || step.kind === "workbook") && !step.placeholder) {
+    renderRangeInto(root, step.kind);
     return;
   }
   textPanel = "read";
+  aiDraft = null;
+  aiDirty = false;
   if (step.placeholder) {
     renderPlaceholder(root, step);
     return;
@@ -1708,16 +1772,17 @@ function handleAct(node) {
     }
     renderSpeed();
   } else if (act === "open-ai") {
-    aiDraft = normalizeAiSlots(ensureAiSlots());
+    aiScope = node.dataset.scope === "workbook" ? "workbook" : "text";
+    aiDraft = normalizeAiSlots(ensureAiSlots(aiScope));
     aiDirty = false;
     textPanel = "ai";
-    rerenderTextSurface();
+    rerenderRangeSurface();
     window.scrollTo(0, 0);
   } else if (act === "back-text") {
     requestLeaveAi(() => {
       textPanel = "read";
       aiDraft = null;
-      rerenderTextSurface();
+      rerenderRangeSurface();
       window.scrollTo(0, 0);
     });
   } else if (act === "clear-ai-image") {
@@ -1725,15 +1790,19 @@ function handleAct(node) {
     if (!aiDraft || !aiDraft[index]) return;
     aiDraft[index].image = "";
     syncAiDirty();
-    rerenderTextSurface();
+    rerenderRangeSurface();
   } else if (act === "save-ai") {
     commitAiDraft();
-  } else if (act === "confirm-text") {
-    const range = $("text-read");
+  } else if (act === "confirm-range") {
+    const kind = node.dataset.kind === "workbook" ? "workbook" : "text";
+    const spec = rangeSpec(kind);
+    const view = node.closest(".view");
+    const range = view ? view.querySelector("input.text-range") : null;
     const value = range ? Number(range.value) : 0;
-    Pcs.confirmTextPages(stateBox.data, tokyoToday(), value);
+    if (kind === "workbook") Pcs.confirmWorkbookSolved(stateBox.data, tokyoToday(), value);
+    else Pcs.confirmTextPages(stateBox.data, tokyoToday(), value);
     afterPcsChange();
-    toast("読んだページを記録しました");
+    toast(spec.toast);
   } else if (act === "text-home") {
     leaveTextHome();
   } else if (act === "pass-placeholder") {
@@ -1965,7 +2034,8 @@ function bind() {
     document.body.classList.remove("is-guide-ox");
     hideStudyChrome();
     textPanel = "read";
-    aiSlots = null;
+    aiScope = "text";
+    aiSaved = { text: null, workbook: null };
     aiDraft = null;
     aiDirty = false;
     stateBox.data = seed();
@@ -2030,6 +2100,8 @@ if (typeof module !== "undefined" && module.exports) {
     OX_URL,
     OX_QUEUE_URL,
     normalizeAiSlots,
-    aiSlotsDirty
+    aiSlotsDirty,
+    AI_KEYS,
+    aiStorageKey
   };
 }

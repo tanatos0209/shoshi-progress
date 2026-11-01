@@ -5,7 +5,7 @@ const assert = require("node:assert/strict");
 
 global.ProgressRules = require("../js/rules.js");
 global.Pcs = require("../js/pcs.js");
-const { oxFrameUrl, queueOpensOx, OX_URL, OX_QUEUE_URL, normalizeAiSlots, aiSlotsDirty } = require("../js/app.js");
+const { oxFrameUrl, queueOpensOx, OX_URL, OX_QUEUE_URL, normalizeAiSlots, aiSlotsDirty, AI_KEYS, aiStorageKey } = require("../js/app.js");
 
 test("daily queue opens ox with today then review", () => {
   assert.equal(queueOpensOx("guide", "ox"), true);
@@ -45,6 +45,15 @@ test("ai drafts stay dirty until the twenty slots match the saved copy", () => {
   typed[1].image = "";
   assert.equal(aiSlotsDirty(saved, typed), false);
   assert.equal(saved.length, 20);
+});
+
+test("workbook ai storage does not share the text key", () => {
+  assert.equal(AI_KEYS.text, "shoshi-progress-ai-v1");
+  assert.equal(AI_KEYS.workbook, "shoshi-progress-ai-workbook-v1");
+  assert.equal(aiStorageKey("text"), AI_KEYS.text);
+  assert.equal(aiStorageKey("workbook"), AI_KEYS.workbook);
+  assert.notEqual(aiStorageKey("text"), aiStorageKey("workbook"));
+  assert.equal(aiStorageKey("notes"), AI_KEYS.text);
 });
 
 test("home and other steps keep the bare ox home", () => {

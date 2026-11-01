@@ -5,7 +5,8 @@
  * The overall percent is an unweighted average of the five breakdown
  * rows: テキスト, 問題集, テキストまとめ, 択一対策, スピードチェック.
  * A row at 0% still counts, so 0/0/100/100/100 is 60, not 100.
- * テキスト is pages read / today's page quota. 問題集 stays 準備中 at 0%.
+ * テキスト is pages read / today's page quota.
+ * 問題集 is problems solved / today's problem quota.
  * Cloze lines are original drill prompts tagged with a source book.
  */
 const Pcs = (function () {
@@ -27,6 +28,13 @@ const Pcs = (function () {
   const TEXT_ASSIGNMENT = {
     subject: "不動産登記法Ⅰ",
     source: "B",
+    start: 1,
+    end: 19
+  };
+  /* One problem span for the workbook screen. Subject and question numbers only. */
+  const WORKBOOK_ASSIGNMENT = {
+    subject: "不動産登記法 I",
+    subtitle: "合格ゾーン択一",
     start: 1,
     end: 19
   };
@@ -127,9 +135,9 @@ const Pcs = (function () {
     return SOURCES.B;
   }
 
-  function cleanSubject(value) {
+  function cleanSubject(value, fallback) {
     const text = String(value || "").replace(/^[0-9]+\s+/, "").replace(/^[ⅠⅡⅢⅣⅤ]\s+/, "").trim();
-    return text || TEXT_ASSIGNMENT.subject;
+    return text || fallback || TEXT_ASSIGNMENT.subject;
   }
 
   function storedText(raw) {
@@ -167,6 +175,43 @@ const Pcs = (function () {
 
   function textScheduled(plan) {
     return !!(plan && plan.text && (Number(plan.text.pages) > 0 || Number(plan.text.end) > 0));
+  }
+
+  function storedWorkbook(raw) {
+    const source = raw && typeof raw === "object" ? raw : WORKBOOK_ASSIGNMENT;
+    const subject = cleanSubject(source.subject || WORKBOOK_ASSIGNMENT.subject, WORKBOOK_ASSIGNMENT.subject);
+    const start = Math.max(1, Math.round(Number(source.start) || WORKBOOK_ASSIGNMENT.start));
+    const end = Math.max(start, Math.round(Number(source.end) || WORKBOOK_ASSIGNMENT.end));
+    const count = end - start + 1;
+    const solved = Math.max(0, Math.min(count, Math.round(Number(source.solved) || 0)));
+    return { subject, subtitle: WORKBOOK_ASSIGNMENT.subtitle, start, end, count, solved };
+  }
+
+  function freshWorkbook() {
+    return storedWorkbook(WORKBOOK_ASSIGNMENT);
+  }
+
+  function workbookQuotaLine(workbook) {
+    const item = storedWorkbook(workbook || WORKBOOK_ASSIGNMENT);
+    return item.subject + " 問" + item.start + "–" + item.end + "（" + item.count + "問）";
+  }
+
+  function workbookRangeLabel(workbook) {
+    const item = storedWorkbook(workbook || WORKBOOK_ASSIGNMENT);
+    return "問 " + item.start + " – " + item.end;
+  }
+
+  function workbookMetaLine(workbook) {
+    const item = storedWorkbook(workbook || WORKBOOK_ASSIGNMENT);
+    return item.subject + " ・ " + item.count + "問";
+  }
+
+  function workbookCountLabel(solved, count) {
+    return Math.max(0, Math.round(Number(solved) || 0)) + "/" + Math.max(0, Math.round(Number(count) || 0)) + "問";
+  }
+
+  function workbookScheduled(plan) {
+    return !!(plan && plan.workbook && (Number(plan.workbook.count) > 0 || Number(plan.workbook.end) > 0));
   }
 
   function noteById(id) {
@@ -300,6 +345,7 @@ const Pcs = (function () {
       rec.pcs.speed.answered = Array.isArray(rec.pcs.speed.answered) ? rec.pcs.speed.answered : [];
       rec.pcs.started = rec.pcs.started === true;
       rec.pcs.text = textScheduled(rec.pcs) ? storedText(rec.pcs.text) : freshText();
+      rec.pcs.workbook = workbookScheduled(rec.pcs) ? storedWorkbook(rec.pcs.workbook) : freshWorkbook();
       if (!rec.pcs.completion) rec.pcs.completion = stamp(rec.pcs, rec.questions);
       return rec.pcs;
     }
@@ -314,6 +360,7 @@ const Pcs = (function () {
       started: false,
       seen: { text: false, workbook: false },
       text: freshText(),
+      workbook: freshWorkbook(),
       notes: { ids: notesSel.ids, roles: notesSel.roles, done: [] },
       ox: { target: oxTarget },
       speed: {
@@ -356,7 +403,11 @@ const Pcs = (function () {
       const item = storedText(plan.text);
       return { done: item.read, target: item.pages };
     }
-    if (id === "workbook") return { done: 0, target: 0 };
+    if (id === "workbook") {
+      if (!workbookScheduled(plan)) return { done: 0, target: 0 };
+      const item = storedWorkbook(plan.workbook);
+      return { done: item.solved, target: item.count };
+    }
     if (id === "notes") return { done: plan.notes.done.length, target: plan.notes.ids.length };
     if (id === "ox") {
       return {
@@ -409,8 +460,10 @@ const Pcs = (function () {
         finished = target > 0 && done >= target;
         status = target > 0 ? done + "/" + target : "準備中";
       } else if (row.id === "workbook") {
-        finished = !!(plan.seen && plan.seen.workbook);
-        status = finished ? "スキップ済み" : "準備中";
+        done = kindMetric(plan, questions, "workbook").done;
+        target = kindMetric(plan, questions, "workbook").target;
+        finished = target > 0 && done >= target;
+        status = target > 0 ? done + "/" + target : "準備中";
       } else if (row.id === "notes") {
         done = plan.notes.done.length;
         target = plan.notes.ids.length;
@@ -455,7 +508,12 @@ const Pcs = (function () {
     } else if (!plan.seen || !plan.seen.text) {
       return { kind: "text", placeholder: true };
     }
-    if (!plan.seen || !plan.seen.workbook) return { kind: "workbook", placeholder: true };
+    if (workbookScheduled(plan)) {
+      const item = storedWorkbook(plan.workbook);
+      if (item.solved < item.count) return { kind: "workbook" };
+    } else if (!plan.seen || !plan.seen.workbook) {
+      return { kind: "workbook", placeholder: true };
+    }
     const noteId = plan.notes.ids.find((id) => plan.notes.done.indexOf(id) === -1);
     if (noteId) return { kind: "notes", id: noteId, role: plan.notes.roles[noteId] || "new" };
     const oxDone = Math.max(0, Math.round(Number(questions) || 0));
@@ -482,6 +540,7 @@ const Pcs = (function () {
 
   function hasResume(plan, questions) {
     if (textScheduled(plan) && storedText(plan.text).read > 0) return true;
+    if (workbookScheduled(plan) && storedWorkbook(plan.workbook).solved > 0) return true;
     if (plan.seen && (plan.seen.text || plan.seen.workbook)) return true;
     if (plan.notes.done.length > 0) return true;
     if (Math.round(Number(questions) || 0) > 0) return true;
@@ -518,7 +577,7 @@ const Pcs = (function () {
     if (kind !== "text" && kind !== "workbook") return { changed: false };
     const plan = ensurePlan(data, today);
     const rec = ensureLog(data, today);
-    if (kind === "text" && textScheduled(plan)) {
+    if ((kind === "text" && textScheduled(plan)) || (kind === "workbook" && workbookScheduled(plan))) {
       return { changed: false, progress: progress(plan, rec.questions) };
     }
     if (plan.seen[kind]) return { changed: false, progress: progress(plan, rec.questions) };
@@ -533,6 +592,18 @@ const Pcs = (function () {
     const next = Math.max(0, Math.min(item.pages, Math.round(Number(read) || 0)));
     const changed = item.read !== next;
     plan.text = storedText({ ...item, read: next });
+    if (next > 0) plan.started = true;
+    stamp(plan, rec.questions);
+    return { changed, progress: progress(plan, rec.questions) };
+  }
+
+  function confirmWorkbookSolved(data, today, solved) {
+    const plan = ensurePlan(data, today);
+    const rec = ensureLog(data, today);
+    const item = storedWorkbook(plan.workbook);
+    const next = Math.max(0, Math.min(item.count, Math.round(Number(solved) || 0)));
+    const changed = item.solved !== next;
+    plan.workbook = storedWorkbook({ ...item, solved: next });
     if (next > 0) plan.started = true;
     stamp(plan, rec.questions);
     return { changed, progress: progress(plan, rec.questions) };
@@ -595,11 +666,16 @@ const Pcs = (function () {
     SOURCES,
     ROWS,
     TEXT_ASSIGNMENT,
+    WORKBOOK_ASSIGNMENT,
     cleanSubject,
     textQuotaLine,
     textRangeLabel,
     textMetaLine,
     textCountLabel,
+    workbookQuotaLine,
+    workbookRangeLabel,
+    workbookMetaLine,
+    workbookCountLabel,
     NOTES,
     SPEED_CHAPTERS,
     addDays,
@@ -619,6 +695,7 @@ const Pcs = (function () {
     hasResume,
     passPlaceholder,
     confirmTextPages,
+    confirmWorkbookSolved,
     completeNote,
     completeOxOne,
     reviewSpeedTopic,

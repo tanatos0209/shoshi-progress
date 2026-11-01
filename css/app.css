@@ -1657,6 +1657,7 @@ body.is-guide-ox .ox-frame {
 .ai-pill {
   flex: 0 0 auto;
   align-self: center;
+  margin-left: auto;
   border: 1px solid #fff1c4;
   border-radius: 999px;
   padding: 6px 12px;
