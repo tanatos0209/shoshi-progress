@@ -38,8 +38,28 @@ const ProgressRules = (function () {
     return (new Date(Date.UTC(y, m - 1, d)).getUTCDay() + 6) % 7;
   }
 
+  /* Monday of the Tokyo civil week that contains iso. Monday = 0. */
   function mondayOf(iso) {
     return addDays(iso, -weekdayMon0(iso));
+  }
+
+  /*
+   * The week shown on the home chart. todayIso is the Tokyo calendar date
+   * (tokyoToday), so the window moves at Monday 00:00 Asia/Tokyo.
+   * Returns Monday through Sunday. Callers only read these keys; older logs stay stored.
+   */
+  function weekDates(todayIso) {
+    const start = mondayOf(todayIso);
+    const dates = [];
+    for (let i = 0; i < 7; i += 1) dates.push(addDays(start, i));
+    return dates;
+  }
+
+  function weekLogMinutes(log, todayIso) {
+    return weekDates(todayIso).map((iso) => {
+      const rec = log && log[iso];
+      return rec ? Math.max(0, Math.round(Number(rec.minutes) || 0)) : 0;
+    });
   }
 
   function daysUntil(examIso, todayIso) {
@@ -408,6 +428,8 @@ const ProgressRules = (function () {
     addDays,
     weekdayMon0,
     mondayOf,
+    weekDates,
+    weekLogMinutes,
     daysUntil,
     formatJPDate,
     formatExamDate,
