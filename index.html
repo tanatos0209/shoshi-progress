@@ -17,7 +17,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&display=swap" rel="stylesheet"/>
-<link rel="stylesheet" href="css/app.css"/>
+<link rel="stylesheet" href="css/app.css?v=4"/>
 <style>html,body{background:#03150f}</style>
 </head>
 <body>
@@ -162,7 +162,7 @@
       </div>
     </section>
 
-    <section id="view-notes" class="view" hidden>
+    <section id="view-notes" class="view study-view" hidden>
       <div class="ph">
         <div class="ph-mark" aria-hidden="true">
           <svg viewBox="0 0 48 48">
@@ -177,11 +177,15 @@
       </div>
     </section>
 
-    <section id="view-ox" class="view ox-view" hidden>
-      <iframe id="ox-frame" class="ox-frame" title="択一対策" referrerpolicy="no-referrer-when-downgrade"></iframe>
+    <section id="view-ox" class="view study-view ox-view" hidden>
+      <div class="ox-fallback">
+        <h2>択一対策</h2>
+        <p>問題画面を読み込んでいます。</p>
+      </div>
+      <iframe id="ox-frame" class="ox-frame" title="択一対策"></iframe>
     </section>
 
-    <section id="view-speed" class="view" hidden>
+    <section id="view-speed" class="view study-view" hidden>
       <div class="ph">
         <div class="ph-mark" aria-hidden="true">
           <svg viewBox="0 0 48 48">
@@ -405,7 +409,7 @@
     </div>
   </div>
 </div>
-<script src="js/rules.js"></script>
-<script src="js/app.js"></script>
+<script src="js/rules.js?v=4"></script>
+<script src="js/app.js?v=4"></script>
 </body>
 </html>

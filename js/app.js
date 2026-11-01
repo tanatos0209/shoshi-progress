@@ -304,16 +304,33 @@ function currentView() {
 
 function ensureOxFrame() {
   const frame = $("ox-frame");
-  if (!frame.getAttribute("src")) frame.src = OX_URL;
+  if (!frame || frame.dataset.loaded === "1") return;
+  frame.dataset.loaded = "1";
+  frame.hidden = true;
+  frame.addEventListener("load", () => {
+    if (frame.dataset.loaded === "1") frame.hidden = false;
+  }, { once: true });
+  frame.src = OX_URL;
+}
+
+function releaseOxFrame() {
+  const frame = $("ox-frame");
+  if (!frame || frame.dataset.loaded !== "1") return;
+  frame.dataset.loaded = "";
+  frame.removeAttribute("src");
 }
 
 function show(view) {
+  if (!document.getElementById("view-" + view)) view = "home";
+  document.body.classList.remove("is-timing");
   document.querySelectorAll(".view").forEach((node) => {
-    node.hidden = node.id !== "view-" + view;
+    const on = node.id === "view-" + view;
+    node.hidden = !on;
+    node.classList.toggle("is-on", on);
   });
   document.body.classList.toggle("is-ox", view === "ox");
-  document.body.classList.remove("is-timing");
   if (view === "ox") ensureOxFrame();
+  else releaseOxFrame();
 
   const tab = view === "notes" || view === "speed" || view === "ox" ? "home" : view;
   document.querySelectorAll(".tab").forEach((node) => {
@@ -339,6 +356,20 @@ function show(view) {
   if (session && view === studyView(session.mode)) renderStudyChrome(presentSession(session, Date.now()));
   else hideStudyChrome();
   window.scrollTo(0, 0);
+  requestAnimationFrame(() => window.scrollTo(0, 0));
+}
+
+function navigateTo(view, replace) {
+  if (!document.getElementById("view-" + view)) view = "home";
+  const next = "#" + view;
+  if (location.hash !== next) {
+    const url = location.pathname + location.search + next;
+    hashGuard = true;
+    if (replace) history.replaceState({ view }, "", url);
+    else history.pushState({ view }, "", url);
+    hashGuard = false;
+  }
+  show(view);
 }
 
 function fillRecord() {
@@ -525,13 +556,7 @@ function stopTicker() {
 }
 
 function enterStudy(mode) {
-  const view = studyView(mode);
-  if (location.hash !== "#" + view) {
-    hashGuard = true;
-    location.hash = "#" + view;
-    hashGuard = false;
-  }
-  show(view);
+  navigateTo(studyView(mode));
   startTicker();
 }
 
@@ -539,6 +564,7 @@ function openStart(mode) {
   if (session || !ENTRANCES[mode]) return;
   pendingEntrance = mode;
   $("start-mode").textContent = ENTRANCES[mode];
+  window.scrollTo(0, 0);
   $("start-sheet").hidden = false;
   $("start-yes").focus();
 }
@@ -582,26 +608,40 @@ function finishSession() {
   lastScreen = "";
   closeEndConfirm();
   hideStudyChrome();
-  hashGuard = true;
-  location.hash = "#" + dest;
-  hashGuard = false;
-  show(dest);
+  navigateTo(dest, true);
   toast("学習時間を記録しました");
 }
 
 function bind() {
-  window.addEventListener("hashchange", () => {
-    if (hashGuard) return;
-    const view = currentView();
+  function onRoute(view) {
     if (session && view !== studyView(session.mode)) {
       pendingLeave = view;
       openEndConfirm();
-      hashGuard = true;
-      location.hash = "#" + studyView(session.mode);
-      hashGuard = false;
+      navigateTo(studyView(session.mode), true);
       return;
     }
     show(view);
+  }
+
+  window.addEventListener("hashchange", () => {
+    if (hashGuard) return;
+    onRoute(currentView());
+  });
+  window.addEventListener("popstate", () => onRoute(currentView()));
+
+  document.querySelectorAll("a[href^='#']").forEach((link) => {
+    link.addEventListener("click", (event) => {
+      const href = link.getAttribute("href") || "";
+      if (!href.startsWith("#") || href.length < 2) return;
+      event.preventDefault();
+      const view = href.slice(1);
+      if (session && view !== studyView(session.mode)) {
+        pendingLeave = document.getElementById("view-" + view) ? view : "home";
+        openEndConfirm();
+        return;
+      }
+      navigateTo(document.getElementById("view-" + view) ? view : "home");
+    });
   });
 
   document.querySelectorAll("[data-entrance]").forEach((button) => {
@@ -724,12 +764,20 @@ function boot() {
     if (session.phase === "paused") session = resumeSession(session, now);
     session = tickSession(session, now);
     flushSession(now, false);
-    enterStudy(session.mode);
-  } else {
-    if (!location.hash) location.hash = "#home";
+    navigateTo(studyView(session.mode), true);
+    startTicker();
+  } else if (location.hash && location.hash !== "#home") {
     show(currentView());
+  } else {
+    navigateTo("home", true);
   }
   if ("serviceWorker" in navigator) {
+    let refreshing = false;
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (refreshing) return;
+      refreshing = true;
+      location.reload();
+    });
     navigator.serviceWorker.register("./sw.js").catch(() => {});
   }
   setInterval(() => {
