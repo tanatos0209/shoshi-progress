@@ -56,6 +56,9 @@ let cloze = { key: "", total: 0, open: new Set() };
 let speedUi = { level: "chapters", chapterId: "", topicId: "", qIndex: 0, feedback: null };
 let textPanel = "read";
 let aiSlots = null;
+let aiDraft = null;
+let aiDirty = false;
+let pendingAiLeave = null;
 const AI_KEY = "shoshi-progress-ai-v1";
 const AI_SLOT_COUNT = 20;
 
@@ -98,6 +101,63 @@ function saveAiSlots(slots) {
 function ensureAiSlots() {
   if (!aiSlots) aiSlots = loadAiSlots();
   return aiSlots;
+}
+
+function aiSlotsDirty(saved, draft) {
+  const left = normalizeAiSlots(saved);
+  const right = normalizeAiSlots(draft);
+  for (let i = 0; i < left.length; i += 1) {
+    if (left[i].image !== right[i].image || left[i].text !== right[i].text) return true;
+  }
+  return false;
+}
+
+function syncAiDirty() {
+  aiDirty = aiSlotsDirty(ensureAiSlots(), aiDraft);
+}
+
+function aiHostView() {
+  if (session && session.mode === "guide") return "guide";
+  return "text";
+}
+
+function discardSheetOpen() {
+  const sheet = $("ai-discard-sheet");
+  return !!(sheet && !sheet.hidden);
+}
+
+function requestLeaveAi(action) {
+  if (textPanel !== "ai" || !aiDirty) {
+    action();
+    return;
+  }
+  pendingAiLeave = action;
+  const sheet = $("ai-discard-sheet");
+  if (!sheet || discardSheetOpen()) return;
+  sheet.hidden = false;
+  $("ai-discard-yes").focus();
+}
+
+function confirmDiscardAi() {
+  aiDraft = normalizeAiSlots(ensureAiSlots());
+  aiDirty = false;
+  const action = pendingAiLeave;
+  pendingAiLeave = null;
+  $("ai-discard-sheet").hidden = true;
+  if (action) action();
+}
+
+function cancelDiscardAi() {
+  pendingAiLeave = null;
+  if (pendingLeave && !endConfirmOpen) pendingLeave = null;
+  $("ai-discard-sheet").hidden = true;
+  const host = aiHostView();
+  if ((location.hash || "") !== "#" + host) {
+    hashGuard = true;
+    history.replaceState({ view: host }, "", location.pathname + location.search + "#" + host);
+    hashGuard = false;
+  }
+  show(host);
 }
 
 function studyView(mode) {
@@ -516,7 +576,11 @@ function show(view) {
     ox: "択一対策"
   };
   document.title = view === "home" ? "進捗管理" : titles[view] + " | 進捗管理";
-  if (view !== "text" && view !== "guide") textPanel = "read";
+  if (view !== "text" && view !== "guide") {
+    textPanel = "read";
+    aiDraft = null;
+    aiDirty = false;
+  }
   if (view === "record") fillRecord();
   if (view === "settings") fillSettings();
   if (view !== "ox") {
@@ -801,6 +865,10 @@ function beginFromConfirm() {
 
 function openEndConfirm() {
   if (!session || endConfirmOpen) return;
+  if (textPanel === "ai" && aiDirty) {
+    requestLeaveAi(() => openEndConfirm());
+    return;
+  }
   endConfirmOpen = true;
   $("end-sheet").hidden = false;
   $("end-title").focus();
@@ -814,6 +882,10 @@ function closeEndConfirm() {
 
 function finishSession() {
   if (!session) return;
+  if (textPanel === "ai" && aiDirty) {
+    requestLeaveAi(() => finishSession());
+    return;
+  }
   const dest = pendingLeave || (session.mode === "guide" ? "today" : "home");
   pendingLeave = null;
   stopTicker();
@@ -967,16 +1039,13 @@ function renderTextRead(parent) {
   const screen = el("div", "text-screen" + (sessionShowsTimer(currentView()) ? " has-timer" : ""));
   const head = el("header", "text-head");
   head.append(bookMark());
-  const main = el("div", "text-head-main");
-  const row = el("div", "text-title-row");
-  row.append(el("h1", "", "テキスト"));
+  const main = el("div", "text-titles");
+  main.append(el("h1", "", "テキスト"));
+  main.append(el("p", "text-source", "Vマジック"));
   const ai = el("button", "ai-pill", "AIサポート");
   ai.type = "button";
   ai.dataset.act = "open-ai";
-  row.append(ai);
-  main.append(row);
-  main.append(el("p", "text-source", "Vマジック"));
-  head.append(main);
+  head.append(main, ai);
   screen.append(head);
 
   const quota = el("section", "card text-quota-card");
@@ -1054,23 +1123,31 @@ function rerenderTextSurface() {
 }
 
 function storeSlotImage(index, file) {
+  if (!aiDraft) aiDraft = normalizeAiSlots(ensureAiSlots());
   fileToImage(file).then((url) => {
-    const slots = ensureAiSlots();
-    const previous = slots[index].image;
-    slots[index].image = url;
-    if (!saveAiSlots(slots)) {
-      slots[index].image = previous;
-      toast("画像を保存できませんでした");
-      return;
-    }
+    if (!aiDraft[index]) return;
+    aiDraft[index].image = url;
+    syncAiDirty();
     rerenderTextSurface();
   }).catch(() => {
     toast("画像ファイルを選んでください");
   });
 }
 
+function commitAiDraft() {
+  if (!aiDraft) aiDraft = normalizeAiSlots(ensureAiSlots());
+  if (!saveAiSlots(aiDraft)) {
+    toast("この端末に保存できませんでした");
+    return;
+  }
+  aiDraft = normalizeAiSlots(aiSlots);
+  aiDirty = false;
+  toast("変更を保存しました");
+}
+
 function renderAiSupport(parent) {
-  const slots = ensureAiSlots();
+  if (!aiDraft) aiDraft = normalizeAiSlots(ensureAiSlots());
+  const slots = aiDraft;
   const screen = el("div", "text-screen ai-screen" + (sessionShowsTimer(currentView()) ? " has-timer" : ""));
   const head = el("header", "ai-head");
   const back = el("button", "ai-back", "‹");
@@ -1085,6 +1162,7 @@ function renderAiSupport(parent) {
   slots.forEach((slot, index) => {
     const row = el("div", "ai-slot");
     row.append(el("span", "ai-num", String(index + 1).padStart(2, "0")));
+    const wrap = el("div", "ai-pick-wrap");
     const pick = el("label", "ai-pick");
     pick.tabIndex = 0;
     if (slot.image) {
@@ -1092,8 +1170,15 @@ function renderAiSupport(parent) {
       img.alt = "";
       img.src = slot.image;
       pick.append(img);
+      const clear = el("button", "ai-x", "×");
+      clear.type = "button";
+      clear.dataset.act = "clear-ai-image";
+      clear.dataset.index = String(index);
+      clear.setAttribute("aria-label", (index + 1) + "枠の画像を消す");
+      wrap.append(pick, clear);
     } else {
       pick.append(el("span", "ai-ph", "画像"));
+      wrap.append(pick);
     }
     const input = document.createElement("input");
     input.type = "file";
@@ -1121,14 +1206,20 @@ function renderAiSupport(parent) {
     memo.value = slot.text;
     memo.setAttribute("aria-label", (index + 1) + "枠のメモ");
     memo.addEventListener("input", () => {
-      const current = ensureAiSlots();
-      current[index].text = memo.value;
-      if (!saveAiSlots(current)) toast("この端末に保存できませんでした");
+      if (!aiDraft[index]) return;
+      aiDraft[index].text = memo.value;
+      syncAiDirty();
     });
-    row.append(pick, memo);
+    row.append(wrap, memo);
     list.append(row);
   });
   screen.append(list);
+  const saveBar = el("div", "ai-save");
+  const save = el("button", "btn-gold", "変更を保存");
+  save.type = "button";
+  save.dataset.act = "save-ai";
+  saveBar.append(save);
+  screen.append(saveBar);
   parent.replaceChildren(screen);
 }
 
@@ -1617,13 +1708,26 @@ function handleAct(node) {
     }
     renderSpeed();
   } else if (act === "open-ai") {
+    aiDraft = normalizeAiSlots(ensureAiSlots());
+    aiDirty = false;
     textPanel = "ai";
     rerenderTextSurface();
     window.scrollTo(0, 0);
   } else if (act === "back-text") {
-    textPanel = "read";
+    requestLeaveAi(() => {
+      textPanel = "read";
+      aiDraft = null;
+      rerenderTextSurface();
+      window.scrollTo(0, 0);
+    });
+  } else if (act === "clear-ai-image") {
+    const index = Number(node.dataset.index);
+    if (!aiDraft || !aiDraft[index]) return;
+    aiDraft[index].image = "";
+    syncAiDirty();
     rerenderTextSurface();
-    window.scrollTo(0, 0);
+  } else if (act === "save-ai") {
+    commitAiDraft();
   } else if (act === "confirm-text") {
     const range = $("text-read");
     const value = range ? Number(range.value) : 0;
@@ -1674,17 +1778,52 @@ function bind() {
     show(view);
   }
 
+  function leaveFor(view) {
+    if (session && !routeAllowed(view)) {
+      pendingLeave = document.getElementById("view-" + view) ? view : "home";
+      show(studyView(session.mode));
+      openEndConfirm();
+      return;
+    }
+    navigateTo(document.getElementById("view-" + view) ? view : "home");
+  }
+
   window.addEventListener("hashchange", () => {
-    if (hashGuard) return;
-    onRoute(currentView());
+    if (hashGuard || discardSheetOpen()) return;
+    const view = currentView();
+    if (textPanel === "ai" && aiDirty && view !== aiHostView()) {
+      hashGuard = true;
+      history.replaceState({ view: aiHostView() }, "", location.pathname + location.search + "#" + aiHostView());
+      hashGuard = false;
+      requestLeaveAi(() => onRoute(view));
+      return;
+    }
+    onRoute(view);
   });
   window.addEventListener("popstate", () => {
-    if (hashGuard) return;
+    if (hashGuard || discardSheetOpen()) return;
+    const view = currentView();
+    if (textPanel === "ai" && aiDirty && view !== aiHostView()) {
+      hashGuard = true;
+      history.pushState({ view: aiHostView() }, "", location.pathname + location.search + "#" + aiHostView());
+      hashGuard = false;
+      requestLeaveAi(() => {
+        if (session) {
+          promptSessionEnd();
+          return;
+        }
+        if (view === "notes" || view === "speed" || view === "ox" || view === "text" || view === "workbook" || view === "guide") {
+          navigateTo("home", true);
+          return;
+        }
+        show(view);
+      });
+      return;
+    }
     if (session) {
       promptSessionEnd();
       return;
     }
-    const view = currentView();
     if (view === "notes" || view === "speed" || view === "ox" || view === "text" || view === "workbook" || view === "guide") {
       navigateTo("home", true);
       return;
@@ -1698,13 +1837,11 @@ function bind() {
       if (!href.startsWith("#") || href.length < 2) return;
       event.preventDefault();
       const view = href.slice(1);
-      if (session && !routeAllowed(view)) {
-        pendingLeave = document.getElementById("view-" + view) ? view : "home";
-        show(studyView(session.mode));
-        openEndConfirm();
+      if (textPanel === "ai" && aiDirty) {
+        requestLeaveAi(() => leaveFor(view));
         return;
       }
-      navigateTo(document.getElementById("view-" + view) ? view : "home");
+      leaveFor(view);
     });
   });
 
@@ -1758,6 +1895,12 @@ function bind() {
   });
   $("btn-next-no").addEventListener("click", finishSession);
 
+  $("ai-discard-yes").addEventListener("click", confirmDiscardAi);
+  $("ai-discard-no").addEventListener("click", cancelDiscardAi);
+  $("ai-discard-sheet").addEventListener("click", (event) => {
+    if (event.target === $("ai-discard-sheet")) cancelDiscardAi();
+  });
+
   $("end-yes").addEventListener("click", finishSession);
   $("end-no").addEventListener("click", closeEndConfirm);
   $("end-sheet").addEventListener("click", (event) => {
@@ -1766,7 +1909,8 @@ function bind() {
 
   document.addEventListener("keydown", (event) => {
     if (event.key !== "Escape") return;
-    if (!$("start-sheet").hidden) closeStart();
+    if (discardSheetOpen()) cancelDiscardAi();
+    else if (!$("start-sheet").hidden) closeStart();
     else if (!$("end-sheet").hidden) closeEndConfirm();
   });
 
@@ -1822,6 +1966,8 @@ function bind() {
     hideStudyChrome();
     textPanel = "read";
     aiSlots = null;
+    aiDraft = null;
+    aiDirty = false;
     stateBox.data = seed();
     save(stateBox.data);
     fillSettings();
@@ -1883,6 +2029,7 @@ if (typeof module !== "undefined" && module.exports) {
     queueOpensOx,
     OX_URL,
     OX_QUEUE_URL,
-    normalizeAiSlots
+    normalizeAiSlots,
+    aiSlotsDirty
   };
 }
