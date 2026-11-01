@@ -12,11 +12,11 @@ function dataOn(today, goal) {
   };
 }
 
-test("breakdown order is fixed and only three kinds feed the average", () => {
+test("breakdown order is fixed and all five kinds feed the average", () => {
   assert.deepEqual(Pcs.ROWS.map((row) => row.label), [
     "テキスト", "問題集", "テキストまとめ", "択一対策", "スピードチェック"
   ]);
-  assert.deepEqual(Pcs.ROWS.map((row) => row.feeds), [false, false, true, true, true]);
+  assert.deepEqual(Pcs.ROWS.map((row) => row.feeds), [true, true, true, true, true]);
 });
 
 test("source books default to Vマジック and 未成年者 is 合格ゾーン", () => {
@@ -31,7 +31,7 @@ test("source books default to Vマジック and 未成年者 is 合格ゾーン"
   });
 });
 
-test("overall percent is an unweighted average of scheduled kinds", () => {
+test("overall percent is an unweighted average of the five breakdown rows", () => {
   const plan = {
     date: "2026-11-01",
     started: true,
@@ -42,7 +42,7 @@ test("overall percent is an unweighted average of scheduled kinds", () => {
     completion: {}
   };
   const model = Pcs.progress(plan, 0);
-  assert.equal(model.overall, Math.round((100 + 0 + 0) / 3));
+  assert.equal(model.overall, Math.round((0 + 0 + 100 + 0 + 0) / 5));
   assert.equal(model.rows.find((row) => row.id === "text").percent, 0);
   assert.equal(model.rows.find((row) => row.id === "workbook").percent, 0);
   assert.equal(model.rows.find((row) => row.id === "notes").percent, 100);
@@ -50,10 +50,27 @@ test("overall percent is an unweighted average of scheduled kinds", () => {
     ...plan,
     speed: { topics: ["t"], questions: ["t:1"], reviewed: ["t"], answered: ["t:1"] }
   }, 0);
-  assert.equal(both.overall, Math.round((100 + 0 + 100) / 3));
+  assert.equal(both.overall, Math.round((0 + 0 + 100 + 0 + 100) / 5));
 });
 
-test("a kind with nothing scheduled drops out of the average", () => {
+test("text 0 and workbook 0 stay in the average when the other three are done", () => {
+  const plan = {
+    seen: { text: false, workbook: false },
+    text: { subject: "不動産登記法Ⅰ", start: 1, end: 19, pages: 19, read: 0 },
+    notes: { ids: ["a", "b"], roles: {}, done: ["a", "b"] },
+    ox: { target: 4 },
+    speed: { topics: ["cap"], questions: ["cap:1"], reviewed: ["cap"], answered: ["cap:1"] }
+  };
+  const model = Pcs.progress(plan, 4);
+  assert.deepEqual(model.rows.map((row) => row.percent), [0, 0, 100, 100, 100]);
+  assert.equal(model.overall, 60);
+  plan.text.read = 19;
+  const full = Pcs.progress(plan, 4);
+  assert.equal(full.rows[0].percent, 100);
+  assert.equal(full.overall, 80);
+});
+
+test("a row at 0 still counts, including a kind with nothing scheduled", () => {
   const plan = {
     date: "2026-11-01",
     started: false,
@@ -64,21 +81,45 @@ test("a kind with nothing scheduled drops out of the average", () => {
     completion: {}
   };
   const model = Pcs.progress(plan, 2);
-  assert.equal(model.parts.length, 1);
-  assert.equal(model.parts[0].id, "ox");
-  assert.equal(model.overall, 50);
+  assert.equal(model.parts.length, 5);
+  assert.equal(model.rows.find((row) => row.id === "ox").percent, 50);
+  assert.equal(model.rows.find((row) => row.id === "notes").percent, 0);
+  assert.equal(model.overall, 10);
 });
 
-test("placeholders come first and do not change the percent", () => {
+test("text quota is one line and confirmed pages can move again", () => {
   const data = dataOn("2026-11-01");
   const plan = Pcs.ensurePlan(data, "2026-11-01");
-  const before = Pcs.progress(plan, 0).overall;
+  assert.equal(plan.text.subject, "不動産登記法Ⅰ");
+  assert.equal(plan.text.pages, 19);
+  assert.equal(Pcs.textQuotaLine(plan.text), "不動産登記法Ⅰ p.1–19（19ページ）");
+  assert.equal(Pcs.textRangeLabel(plan.text), "p.1 – 19");
+  assert.equal(Pcs.textMetaLine(plan.text), "不動産登記法Ⅰ ・ 19ページ");
+  assert.equal(Pcs.textCountLabel(0, 19), "0/19ページ");
+  assert.equal(/^[0-9]/.test(Pcs.textQuotaLine(plan.text)), false);
+  const cleaned = Pcs.textQuotaLine({ subject: "1 民法Ⅰ", start: 1, end: 19 });
+  assert.equal(cleaned, "民法Ⅰ p.1–19（19ページ）");
+  assert.equal(Pcs.textQuotaLine({ subject: "Ⅰ 民法", start: 1, end: 19 }), "民法 p.1–19（19ページ）");
   assert.equal(Pcs.nextStep(plan, 0).kind, "text");
-  const passed = Pcs.passPlaceholder(data, "2026-11-01", "text");
-  assert.equal(passed.changed, true);
-  assert.equal(passed.progress.overall, before);
+  assert.equal(Pcs.nextStep(plan, 0).placeholder, undefined);
+  assert.equal(Pcs.passPlaceholder(data, "2026-11-01", "text").changed, false);
+  const partial = Pcs.confirmTextPages(data, "2026-11-01", 10);
+  assert.equal(partial.changed, true);
+  assert.equal(plan.text.read, 10);
+  assert.equal(partial.progress.rows.find((row) => row.id === "text").percent, Math.round((10 / 19) * 100));
+  assert.equal(Pcs.nextStep(plan, 0).kind, "text");
+  const again = Pcs.confirmTextPages(data, "2026-11-01", 4);
+  assert.equal(again.changed, true);
+  assert.equal(plan.text.read, 4);
+  assert.equal(Pcs.confirmTextPages(data, "2026-11-01", 99).changed, true);
+  assert.equal(plan.text.read, 19);
+  assert.equal(Pcs.progress(plan, 0).rows.find((row) => row.id === "text").percent, 100);
   assert.equal(Pcs.nextStep(plan, 0).kind, "workbook");
-  Pcs.passPlaceholder(data, "2026-11-01", "workbook");
+  assert.equal(Pcs.nextStep(plan, 0).placeholder, true);
+  const before = Pcs.progress(plan, 0).overall;
+  const passed = Pcs.passPlaceholder(data, "2026-11-01", "workbook");
+  assert.equal(passed.changed, true);
+  assert.equal(passed.progress.rows.find((row) => row.id === "workbook").percent, 0);
   assert.equal(Pcs.progress(plan, 0).overall, before);
   assert.equal(Pcs.nextStep(plan, 0).kind, "notes");
   assert.equal(plan.notes.roles[plan.notes.ids[0]], "new");
@@ -87,7 +128,7 @@ test("placeholders come first and do not change the percent", () => {
 test("one note, one ox question, and one speed action do not finish the day", () => {
   const data = dataOn("2026-11-01");
   const plan = Pcs.ensurePlan(data, "2026-11-01");
-  Pcs.passPlaceholder(data, "2026-11-01", "text");
+  Pcs.confirmTextPages(data, "2026-11-01", 19);
   Pcs.passPlaceholder(data, "2026-11-01", "workbook");
   const note = Pcs.nextStep(plan, 0);
   const afterNote = Pcs.completeNote(data, "2026-11-01", note.id, "known");
