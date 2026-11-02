@@ -103,6 +103,22 @@ test("study spans split on Tokyo midnight and round into minutes", () => {
   assert.equal(R.syncStreak(data, "2026-11-01"), 1);
 });
 
+test("book time sits beside the day total and splits at Tokyo midnight", () => {
+  const data = { log: {} };
+  const start = R.tokyoMidnightMs("2026-11-02") - 30 * 1000;
+  const end = R.tokyoMidnightMs("2026-11-02") + 90 * 1000;
+  R.addStudySpan(data, start, end);
+  R.addBookStudySpan(data, "vm", start, end);
+  assert.equal(data.log["2026-11-01"].minutes, 0);
+  assert.equal(data.log["2026-11-01"].bookTime.vm.carryMs, 30000);
+  assert.equal(data.log["2026-11-02"].minutes, 1);
+  assert.equal(data.log["2026-11-02"].bookTime.vm.minutes, 1);
+  assert.equal(data.log["2026-11-02"].bookTime.vm.carryMs, 30000);
+  assert.equal(R.bookTimeOf(data.log, "2026-11-02", "vm").minutes, 1);
+  assert.equal(R.bookTimeOf(data.log, "2026-11-02", "other").minutes, 0);
+  assert.equal(R.addBookStudySpan(data, "", start, end), 0);
+});
+
 test("sample minutes are replaced when real study lands on that day", () => {
   const data = { log: { "2026-11-01": { minutes: 90, questions: 0, sample: true } } };
   R.addStudyMs(data, "2026-11-01", 60000);

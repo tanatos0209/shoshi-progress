@@ -4,7 +4,7 @@
    Local storage stays the source of truth. Firestore mirrors it when a
    Google user is signed in. Last write wins by client timestamp.
    Paths (same Firebase project as the ox app):
-     users/{uid}/progress/state
+     users/{uid}/progress/state      (progress, settings, timer, books)
      users/{uid}/progress/ai-text
      users/{uid}/progress/ai-workbook
    shoshi-ox should use users/{uid}/ox/... with the same rules. */
@@ -58,11 +58,19 @@ function configReady(cfg) {
   return true;
 }
 
+function hasSyncedBooks(data) {
+  if (!data || !Array.isArray(data.books)) return false;
+  return data.books.some((book) => {
+    return !!(book && typeof book.title === "string" && book.title.trim());
+  });
+}
+
 function isUntouchedDemo(data) {
   if (!data || typeof data !== "object") return true;
   if (data.demo !== true) return false;
   if (data.studied === true) return false;
   if (data.activeSession) return false;
+  if (hasSyncedBooks(data)) return false;
   return true;
 }
 
@@ -361,7 +369,7 @@ if (typeof window !== "undefined") {
     if (detail) {
       if (!state.configured) detail.textContent = "js/firebase-config.js にウェブアプリの設定を貼り付けると使えます。";
       else if (phase === "held") detail.textContent = "別の Google アカウントの記録がこの端末に残っています。クラウドが空なので、自動では送っていません。";
-      else detail.textContent = "進捗、PCS、テキストと問題集のAIサポート、タイマー、設定を、同じGoogleアカウントの端末どうしで同期します。";
+      else detail.textContent = "進捗、PCS、テキスト・教材、テキストと問題集のAIサポート、タイマー、設定を、同じGoogleアカウントの端末どうしで同期します。";
     }
     const signIn = $("sync-sign-in");
     const signOut = $("sync-sign-out");

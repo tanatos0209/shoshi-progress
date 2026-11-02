@@ -13,6 +13,9 @@ const {
   examSummary,
   syncStreak,
   addStudySpan,
+  addBookStudySpan,
+  bookTimeOf,
+  formatElapsed,
   createSession,
   tickSession,
   resumeSession,
@@ -60,11 +63,30 @@ let aiSaved = { text: null, workbook: null };
 let aiDraft = null;
 let aiDirty = false;
 let pendingAiLeave = null;
+let booksDraft = null;
+let bookEditing = null;
+let bookFormDirty = false;
+let discardKind = "ai";
+let bookRun = null;
+let bookRunId = "";
+let bookTicker = 0;
+let bookLeaveAction = null;
+let unitTargetId = "";
+let unitChoice = "";
 const AI_KEYS = {
   text: "shoshi-progress-ai-v1",
   workbook: "shoshi-progress-ai-workbook-v1"
 };
 const AI_SLOT_COUNT = 20;
+const BOOK_LIMIT = 25;
+const BOOK_TITLE_MAX = 40;
+const BOOK_NOTE_MAX = 80;
+const BOOK_IMAGE_MAX = 22000;
+const BOOK_COLORS = ["#c0392b", "#f6f1e7", "#1e4d8c", "#8e1b3a", "#1f6b4a", "#d4a017", "#2c3e50", "#e07a3d"];
+const DISCARD_COPY = {
+  ai: "保存していない画像とメモは残しません。",
+  books: "保存していないテキスト・教材の変更は残しません。"
+};
 
 function aiStorageKey(scope) {
   return scope === "workbook" ? AI_KEYS.workbook : AI_KEYS.text;
@@ -145,24 +167,211 @@ function discardSheetOpen() {
   return !!(sheet && !sheet.hidden);
 }
 
+function makeBookId(seedIndex) {
+  const n = Math.max(0, Math.round(Number(seedIndex) || 0));
+  return "b" + Date.now().toString(36) + n.toString(36) + Math.random().toString(36).slice(2, 7);
+}
+
+function cleanBookImage(value) {
+  if (typeof value !== "string") return "";
+  if (!/^data:image\/(jpeg|png|webp|gif);base64,[a-z0-9+/=\s]+$/i.test(value)) return "";
+  if (value.length > BOOK_IMAGE_MAX) return "";
+  return value;
+}
+
+function bookColorAt(value, index) {
+  if (typeof value === "string" && BOOK_COLORS.indexOf(value) >= 0) return value;
+  const n = Math.abs(Math.round(Number(index) || 0));
+  return BOOK_COLORS[n % BOOK_COLORS.length];
+}
+
+function cleanBookUnit(item) {
+  const source = item && typeof item === "object" ? item : {};
+  const unit = source.unit === "page" || source.unit === "question" ? source.unit : "";
+  const total = Math.round(Number(source.total) || 0);
+  if (!unit || total < 1) return { unit: "", total: 0 };
+  return { unit: unit, total: Math.min(9999, total) };
+}
+
+function foldSubject(value) {
+  return String(value || "")
+    .replace(/\s+/g, "")
+    .replace(/Ⅰ/g, "I")
+    .replace(/Ⅱ/g, "II")
+    .replace(/Ⅲ/g, "III")
+    .replace(/Ⅳ/g, "IV")
+    .replace(/Ⅴ/g, "V")
+    .replace(/[IVX]+$/g, "");
+}
+
+function bookNamesSubject(book, subject) {
+  const core = foldSubject(subject);
+  if (core.length < 2) return false;
+  const blob = foldSubject((book && book.title) + " " + (book && book.note));
+  return blob.indexOf(core) >= 0;
+}
+
+function bookGauge(book, plan) {
+  const locked = cleanBookUnit(book);
+  let current = 0;
+  let linked = false;
+  if (locked.unit === "page" && plan && plan.text && bookNamesSubject(book, plan.text.subject)) {
+    linked = true;
+    current = Math.max(0, Math.round(Number(plan.text.read) || 0));
+  } else if (locked.unit === "question" && plan && plan.workbook && bookNamesSubject(book, plan.workbook.subject)) {
+    linked = true;
+    current = Math.max(0, Math.round(Number(plan.workbook.solved) || 0));
+  }
+  if (locked.total > 0) current = Math.min(current, locked.total);
+  else current = 0;
+  return { unit: locked.unit, current: current, total: locked.total, linked: linked };
+}
+
+function bookGaugeLabel(gauge) {
+  const current = Math.max(0, Math.round(Number(gauge && gauge.current) || 0));
+  const total = Math.max(0, Math.round(Number(gauge && gauge.total) || 0));
+  if (gauge && gauge.unit === "question") return "問" + current + " / 問" + total;
+  return "P." + current + " / P." + total;
+}
+
+function normalizeBooks(raw) {
+  const list = Array.isArray(raw) ? raw : [];
+  const out = [];
+  const seen = new Set();
+  for (let i = 0; i < list.length && out.length < BOOK_LIMIT; i += 1) {
+    const item = list[i];
+    if (!item || typeof item !== "object") continue;
+    const title = typeof item.title === "string" ? item.title.trim().slice(0, BOOK_TITLE_MAX) : "";
+    if (!title) continue;
+    let id = typeof item.id === "string" ? item.id.trim().slice(0, 40) : "";
+    if (!id || seen.has(id)) id = makeBookId(out.length);
+    seen.add(id);
+    const note = typeof item.note === "string" ? item.note.trim().slice(0, BOOK_NOTE_MAX) : "";
+    const locked = cleanBookUnit(item);
+    out.push({
+      id: id,
+      title: title,
+      note: note,
+      image: cleanBookImage(item.image),
+      color: bookColorAt(item.color, out.length),
+      unit: locked.unit,
+      total: locked.total
+    });
+  }
+  return out;
+}
+
+function copyBook(book) {
+  const locked = cleanBookUnit(book);
+  return {
+    id: book.id,
+    title: book.title,
+    note: book.note,
+    image: book.image,
+    color: book.color,
+    unit: locked.unit,
+    total: locked.total
+  };
+}
+
+function booksEqual(a, b) {
+  const left = normalizeBooks(a);
+  const right = normalizeBooks(b);
+  if (left.length !== right.length) return false;
+  for (let i = 0; i < left.length; i += 1) {
+    if (left[i].id !== right[i].id) return false;
+    if (left[i].title !== right[i].title) return false;
+    if (left[i].note !== right[i].note) return false;
+    if (left[i].image !== right[i].image) return false;
+    if (left[i].color !== right[i].color) return false;
+    if (left[i].unit !== right[i].unit) return false;
+    if (left[i].total !== right[i].total) return false;
+  }
+  return true;
+}
+
+function emptyBookSlots(count) {
+  const n = Math.max(0, Math.min(BOOK_LIMIT, Math.round(Number(count) || 0)));
+  if (n >= BOOK_LIMIT) return 0;
+  const remain = BOOK_LIMIT - n;
+  const pad = (4 - (n % 4)) % 4;
+  const want = pad === 0 ? 4 : pad;
+  return Math.min(remain, want);
+}
+
+function coverInk(color) {
+  const hex = String(color || "").replace("#", "");
+  if (!/^[0-9a-fA-F]{6}$/.test(hex)) return "#fffaf0";
+  const r = parseInt(hex.slice(0, 2), 16);
+  const g = parseInt(hex.slice(2, 4), 16);
+  const b = parseInt(hex.slice(4, 6), 16);
+  const luma = (r * 299 + g * 587 + b * 114) / 1000;
+  return luma > 170 ? "#2a2116" : "#fffaf0";
+}
+
+function savedBooks() {
+  return normalizeBooks(stateBox.data && stateBox.data.books);
+}
+
+function ensureBooksDraft() {
+  if (!booksDraft) booksDraft = savedBooks().map(copyBook);
+  return booksDraft;
+}
+
+function booksNeedConfirm() {
+  if (bookFormDirty) return true;
+  if (!booksDraft) return false;
+  return !booksEqual(savedBooks(), booksDraft);
+}
+
+function openDiscard(kind, action) {
+  pendingAiLeave = action;
+  discardKind = kind === "books" ? "books" : "ai";
+  const sheet = $("ai-discard-sheet");
+  if (!sheet || discardSheetOpen()) return;
+  const copy = $("ai-discard-copy");
+  if (copy) copy.textContent = DISCARD_COPY[discardKind];
+  sheet.hidden = false;
+  $("ai-discard-yes").focus();
+}
+
 function requestLeaveAi(action) {
   if (textPanel !== "ai" || !aiDirty) {
     action();
     return;
   }
-  pendingAiLeave = action;
-  const sheet = $("ai-discard-sheet");
-  if (!sheet || discardSheetOpen()) return;
-  sheet.hidden = false;
-  $("ai-discard-yes").focus();
+  openDiscard("ai", action);
+}
+
+function requestLeaveBooks(action) {
+  if (!booksNeedConfirm()) {
+    action();
+    return;
+  }
+  openDiscard("books", action);
 }
 
 function confirmDiscardAi() {
-  aiDraft = normalizeAiSlots(ensureAiSlots(aiScope));
-  aiDirty = false;
+  const kind = discardKind;
   const action = pendingAiLeave;
   pendingAiLeave = null;
+  discardKind = "ai";
   $("ai-discard-sheet").hidden = true;
+  const copy = $("ai-discard-copy");
+  if (copy) copy.textContent = DISCARD_COPY.ai;
+  if (kind === "books") {
+    booksDraft = null;
+    bookFormDirty = false;
+    bookEditing = null;
+    const editor = $("book-sheet");
+    const remove = $("book-delete-sheet");
+    if (editor) editor.hidden = true;
+    if (remove) remove.hidden = true;
+    if (action) action();
+    return;
+  }
+  aiDraft = normalizeAiSlots(ensureAiSlots(aiScope));
+  aiDirty = false;
   if (window.ShoshiSync && window.ShoshiSync.recheck) {
     window.ShoshiSync.recheck(aiScope === "workbook" ? "ai-workbook" : "ai-text");
   }
@@ -170,9 +379,22 @@ function confirmDiscardAi() {
 }
 
 function cancelDiscardAi() {
+  const kind = discardKind;
   pendingAiLeave = null;
+  discardKind = "ai";
   if (pendingLeave && !endConfirmOpen) pendingLeave = null;
   $("ai-discard-sheet").hidden = true;
+  const copy = $("ai-discard-copy");
+  if (copy) copy.textContent = DISCARD_COPY.ai;
+  if (kind === "books") {
+    if ((location.hash || "") !== "#record") {
+      hashGuard = true;
+      history.replaceState({ view: "record" }, "", location.pathname + location.search + "#record");
+      hashGuard = false;
+    }
+    show("record");
+    return;
+  }
   const host = aiHostView();
   if ((location.hash || "") !== "#" + host) {
     hashGuard = true;
@@ -237,7 +459,8 @@ function seed() {
       [today]: { minutes: 0, questions: 0, carryMs: 0 }
     },
     srs: { notes: {}, speed: {} },
-    activeSession: null
+    activeSession: null,
+    books: []
   };
 }
 
@@ -278,7 +501,8 @@ function normalize(data) {
     studied: data.studied === true,
     streak: Math.max(0, Math.round(Number(data.streak) || 0)),
     lastStudyDate: typeof data.lastStudyDate === "string" ? data.lastStudyDate : "",
-    activeSession: sanitizeSession(data.activeSession)
+    activeSession: sanitizeSession(data.activeSession),
+    books: normalizeBooks(data && data.books)
   };
 }
 
@@ -297,6 +521,7 @@ function settle(data) {
       }
     };
     if (prev.pcs) data.log[today].pcs = prev.pcs;
+    if (prev.bookTime) data.log[today].bookTime = prev.bookTime;
     data.streak = 0;
     data.lastStudyDate = "";
   } else {
@@ -350,7 +575,8 @@ function materializeDemo(data) {
         minutes: Math.max(0, Math.round(Number(current.minutes) || 0)),
         questions: Math.max(0, Math.round(Number(current.questions) || 0)),
         carryMs: Math.max(0, Number(current.carryMs) || 0),
-        pcs: current.pcs
+        pcs: current.pcs,
+        bookTime: current.bookTime
       };
     } else {
       const prev = data.log[key] || {};
@@ -608,6 +834,13 @@ function show(view) {
     aiDraft = null;
     aiDirty = false;
   }
+  if (view !== "record") {
+    closeBookSheets();
+    if (bookRunId) {
+      if (bookRun) commitBookRun(Date.now());
+      closeBookRun();
+    }
+  }
   if (view === "record") fillRecord();
   if (view === "settings") fillSettings();
   if (view !== "ox") {
@@ -618,6 +851,7 @@ function show(view) {
   renderHome();
   if (sessionShowsTimer(view)) renderStudyChrome(presentSession(session, Date.now()));
   else hideStudyChrome();
+  if (bookRun && !(session && sessionShowsTimer(view))) renderBookBadge(Date.now());
   if (view === "today") renderToday();
   if (view === "guide") renderGuide();
   if (view === "notes") renderNotes();
@@ -642,22 +876,533 @@ function navigateTo(view, replace) {
   show(view);
 }
 
+function closeBookSheets() {
+  bookEditing = null;
+  bookFormDirty = false;
+  const editor = $("book-sheet");
+  const remove = $("book-delete-sheet");
+  const file = $("book-file");
+  if (editor) editor.hidden = true;
+  if (remove) remove.hidden = true;
+  if (file) file.value = "";
+}
+
+function bookCover(book, className) {
+  const cover = el("span", className + (book.image ? " has-image" : " is-plain"));
+  cover.style.background = book.color;
+  if (book.image) {
+    const img = document.createElement("img");
+    img.alt = "";
+    img.src = book.image;
+    cover.append(img);
+  } else {
+    const label = el("span", "book-cover-label", book.title);
+    label.style.color = coverInk(book.color);
+    cover.append(label);
+  }
+  return cover;
+}
+
+function bookTile(book) {
+  const wrap = el("div", "book-tile");
+  const open = el("button", "book-open");
+  open.type = "button";
+  open.dataset.act = "open-book";
+  open.dataset.id = book.id;
+  open.setAttribute("aria-label", book.title + "を記録");
+  const caption = el("span", "book-caption");
+  caption.append(el("b", "", book.title));
+  if (book.note) caption.append(el("small", "", book.note));
+  open.append(bookCover(book, "book-cover"), caption);
+  const edit = el("button", "book-edit", "編集");
+  edit.type = "button";
+  edit.dataset.act = "edit-book";
+  edit.dataset.id = book.id;
+  edit.setAttribute("aria-label", book.title + "を編集");
+  wrap.append(open, edit);
+  return wrap;
+}
+
+function addBookTile() {
+  const btn = el("button", "book-add", "＋");
+  btn.type = "button";
+  btn.dataset.act = "add-book";
+  btn.setAttribute("aria-label", "教材を追加");
+  return btn;
+}
+
+function renderBookShelf() {
+  const books = ensureBooksDraft();
+  const count = $("book-count");
+  if (count) count.textContent = String(books.length);
+  const grid = $("book-grid");
+  if (!grid) return;
+  grid.replaceChildren();
+  books.forEach((book) => grid.append(bookTile(book)));
+  const empties = emptyBookSlots(books.length);
+  for (let i = 0; i < empties; i += 1) grid.append(addBookTile());
+}
+
 function fillRecord() {
+  const date = $("record-date");
+  if (date) date.textContent = formatJPDate(tokyoToday());
+  renderBookShelf();
+}
+
+function paintBookColors() {
+  const wrap = $("book-colors");
+  if (!wrap || !bookEditing) return;
+  wrap.replaceChildren();
+  BOOK_COLORS.forEach((color) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "book-swatch";
+    btn.style.background = color;
+    btn.setAttribute("role", "radio");
+    btn.setAttribute("aria-checked", bookEditing.color === color ? "true" : "false");
+    btn.setAttribute("aria-label", "色");
+    btn.addEventListener("click", () => {
+      if (!bookEditing) return;
+      bookEditing.color = color;
+      bookFormDirty = true;
+      paintBookColors();
+    });
+    wrap.append(btn);
+  });
+}
+
+function paintBookImage() {
+  const img = $("book-pick-img");
+  const ph = $("book-pick-ph");
+  const clear = $("book-clear-image");
+  const image = bookEditing && bookEditing.image;
+  if (!img || !ph || !clear) return;
+  if (image) {
+    img.src = image;
+    img.hidden = false;
+    ph.hidden = true;
+    clear.hidden = false;
+  } else {
+    img.removeAttribute("src");
+    img.hidden = true;
+    ph.hidden = false;
+    clear.hidden = true;
+  }
+}
+
+function openBookEditor(book) {
+  const isNew = !book;
+  if (isNew && ensureBooksDraft().length >= BOOK_LIMIT) {
+    toast("登録は25冊までです");
+    return;
+  }
+  bookEditing = book ? copyBook(book) : {
+    id: makeBookId(ensureBooksDraft().length),
+    title: "",
+    note: "",
+    image: "",
+    color: bookColorAt("", ensureBooksDraft().length),
+    unit: "",
+    total: 0
+  };
+  bookEditing.isNew = isNew;
+  bookFormDirty = false;
+  $("book-sheet-title").textContent = isNew ? "教材を追加" : "教材を編集";
+  $("book-title").value = bookEditing.title;
+  $("book-note").value = bookEditing.note;
+  $("book-apply").textContent = isNew ? "一覧に追加" : "一覧に反映";
+  $("book-delete").hidden = isNew;
+  const file = $("book-file");
+  if (file) file.value = "";
+  paintBookImage();
+  paintBookColors();
+  $("book-sheet").hidden = false;
+  $("book-title").focus();
+}
+
+function closeBookEditor() {
+  bookEditing = null;
+  bookFormDirty = false;
+  const sheet = $("book-sheet");
+  const file = $("book-file");
+  if (sheet) sheet.hidden = true;
+  if (file) file.value = "";
+}
+
+function readBookForm() {
+  if (!bookEditing) return null;
+  return {
+    id: bookEditing.id,
+    title: $("book-title").value.trim().slice(0, BOOK_TITLE_MAX),
+    note: $("book-note").value.trim().slice(0, BOOK_NOTE_MAX),
+    image: bookEditing.image || "",
+    color: bookEditing.color,
+    isNew: !!bookEditing.isNew
+  };
+}
+
+function applyBookForm() {
+  const next = readBookForm();
+  if (!next) return false;
+  if (!next.title) {
+    toast("タイトルを入力してください");
+    $("book-title").focus();
+    return false;
+  }
+  const draft = ensureBooksDraft();
+  const index = draft.findIndex((item) => item.id === next.id);
+  if (index < 0 && draft.length >= BOOK_LIMIT) {
+    toast("登録は25冊までです");
+    return false;
+  }
+  const prevLocked = cleanBookUnit(index >= 0 ? draft[index] : bookEditing);
+  const stored = {
+    id: next.id,
+    title: next.title,
+    note: next.note,
+    image: cleanBookImage(next.image),
+    color: bookColorAt(next.color, index >= 0 ? index : draft.length),
+    unit: prevLocked.unit,
+    total: prevLocked.total
+  };
+  if (index >= 0) draft[index] = stored;
+  else draft.push(stored);
+  closeBookEditor();
+  renderBookShelf();
+  return true;
+}
+
+function openBookDelete() {
+  if (!bookEditing || bookEditing.isNew) return;
+  const name = $("book-delete-name");
+  const typed = $("book-title").value.trim() || bookEditing.title;
+  if (name) name.textContent = typed;
+  $("book-delete-sheet").hidden = false;
+  $("book-delete-yes").focus();
+}
+
+function closeBookDelete() {
+  const sheet = $("book-delete-sheet");
+  if (sheet) sheet.hidden = true;
+}
+
+function confirmBookDelete() {
+  if (!bookEditing) return;
+  const id = bookEditing.id;
+  const draft = ensureBooksDraft();
+  const index = draft.findIndex((item) => item.id === id);
+  if (index >= 0) draft.splice(index, 1);
+  closeBookDelete();
+  closeBookEditor();
+  renderBookShelf();
+}
+
+function storeBookImage(file) {
+  fileToImage(file, { maxEdge: 240, qualities: [0.62, 0.48, 0.36], maxChars: BOOK_IMAGE_MAX }).then((url) => {
+    if (!bookEditing) return;
+    bookEditing.image = url;
+    bookFormDirty = true;
+    paintBookImage();
+  }).catch((err) => {
+    toast(err && err.message === "size" ? "表紙画像が大きすぎます" : "画像ファイルを選んでください");
+  });
+}
+
+function commitBooks() {
+  const editor = $("book-sheet");
+  if (editor && !editor.hidden) {
+    toast("開いている教材を一覧へ反映してください");
+    return;
+  }
+  if (!booksDraft || booksEqual(savedBooks(), booksDraft)) {
+    toast("保存する変更はありません");
+    return;
+  }
   const data = stateBox.data;
-  const rec = todayRecord(data);
-  $("record-date").textContent = formatJPDate(tokyoToday());
-  $("record-now").textContent = formatDuration(floorStudyMinutes(data.log[tokyoToday()] || rec));
-  $("record-questions").textContent = String(rec.questions);
-  $("q-input").value = String(rec.questions);
-  $("add-minutes").value = "";
-  $("main-choice-input").value = String(data.subjects.main.choice);
-  $("main-written-input").value = String(data.subjects.main.written);
-  $("minor-choice-input").value = String(data.subjects.minor.choice);
-  $("minor-written-input").value = String(data.subjects.minor.written);
-  $("main-choice-val").textContent = data.subjects.main.choice + "%";
-  $("main-written-val").textContent = data.subjects.main.written + "%";
-  $("minor-choice-val").textContent = data.subjects.minor.choice + "%";
-  $("minor-written-val").textContent = data.subjects.minor.written + "%";
+  data.books = normalizeBooks(booksDraft);
+  save(data);
+  booksDraft = savedBooks().map(copyBook);
+  bookFormDirty = false;
+  renderBookShelf();
+  toast("変更を保存しました");
+}
+
+function lookupBook(id) {
+  const lists = [booksDraft, stateBox.data && stateBox.data.books];
+  for (let i = 0; i < lists.length; i += 1) {
+    const list = lists[i];
+    if (!Array.isArray(list)) continue;
+    const found = list.find((item) => item && item.id === id);
+    if (found) return found;
+  }
+  return null;
+}
+
+function todayPlan(data) {
+  const today = tokyoToday();
+  const rec = data && data.log && data.log[today];
+  const pcs = rec && rec.pcs;
+  if (!pcs || pcs.date !== today) return null;
+  return pcs;
+}
+
+function bookTodayMs(bookId, now) {
+  const stored = bookTimeOf(stateBox.data && stateBox.data.log, tokyoToday(), bookId);
+  let ms = stored.minutes * 60000 + stored.carryMs;
+  if (bookRun && bookRun.bookId === bookId && now > bookRun.startedAt) ms += now - bookRun.startedAt;
+  return ms;
+}
+
+function stopBookTicker() {
+  clearInterval(bookTicker);
+  bookTicker = 0;
+}
+
+function renderBookBadge(now) {
+  const badge = $("measure-badge");
+  if (!badge) return;
+  if (session && sessionShowsTimer(currentView())) return;
+  if (!bookRun) {
+    if (!session) badge.hidden = true;
+    return;
+  }
+  badge.hidden = false;
+  $("measure-clock").textContent = formatElapsed(Math.max(0, now - bookRun.startedAt));
+}
+
+function startBookTicker() {
+  stopBookTicker();
+  const frame = () => {
+    if (!bookRun) return;
+    const now = Date.now();
+    renderBookBadge(now);
+    if (bookRunId) paintBookRun();
+  };
+  frame();
+  bookTicker = setInterval(frame, 250);
+}
+
+function writeBookSpan(id, start, now) {
+  if (!(now > start) || !id) return false;
+  const data = stateBox.data;
+  data.studied = true;
+  const today = tokyoToday();
+  const rec = data.log[today] || { minutes: 0, carryMs: 0, questions: 0 };
+  const pending = (Number(rec.carryMs) || 0) + (now - start);
+  const minutesAfter = (Number(rec.minutes) || 0) + Math.floor(pending / 60000);
+  if (minutesAfter >= 1) materializeDemo(data);
+  addStudySpan(data, start, now);
+  addBookStudySpan(data, id, start, now);
+  syncStreak(data, today);
+  save(data);
+  renderHome();
+  return true;
+}
+
+function commitBookRun(now) {
+  if (!bookRun) return false;
+  const start = bookRun.startedAt;
+  const id = bookRun.bookId;
+  bookRun = null;
+  stopBookTicker();
+  const wrote = writeBookSpan(id, start, now);
+  renderBookBadge(now);
+  return wrote;
+}
+
+function checkpointBookRun(now) {
+  if (!bookRun) return;
+  const start = bookRun.startedAt;
+  const id = bookRun.bookId;
+  if (!(now > start)) return;
+  writeBookSpan(id, start, now);
+  if (bookRun && bookRun.bookId === id) bookRun.startedAt = now;
+}
+
+function closeBookRun() {
+  bookRunId = "";
+  const panel = $("book-run");
+  const host = $("book-run-cover");
+  if (host) delete host.dataset.bookId;
+  if (panel) panel.hidden = true;
+  document.body.classList.remove("is-book-run");
+}
+
+function paintBookRun() {
+  const book = lookupBook(bookRunId);
+  const panel = $("book-run");
+  if (!book || !panel) {
+    if (bookRun) commitBookRun(Date.now());
+    closeBookRun();
+    return;
+  }
+  panel.hidden = false;
+  document.body.classList.add("is-book-run");
+  const host = $("book-run-cover");
+  if (host && host.dataset.bookId !== book.id) {
+    host.dataset.bookId = book.id;
+    host.replaceChildren(bookCover(book, "book-cover book-run-face"));
+  }
+  const gauge = bookGauge(book, todayPlan(stateBox.data));
+  const fraction = $("book-run-fraction");
+  if (fraction) fraction.textContent = bookGaugeLabel(gauge);
+  const fill = $("book-run-fill");
+  if (fill) {
+    const pct = gauge.total > 0 ? (gauge.current / gauge.total) * 100 : 0;
+    fill.style.width = Math.max(0, Math.min(100, pct)) + "%";
+  }
+  const today = $("book-run-today");
+  if (today) today.textContent = formatDuration(Math.floor(bookTodayMs(book.id, Date.now()) / 60000));
+  const toggle = $("book-run-toggle");
+  const running = !!(bookRun && bookRun.bookId === book.id);
+  if (toggle) {
+    toggle.textContent = running ? "ストップ" : "スタート";
+    toggle.classList.toggle("is-stop", running);
+    toggle.setAttribute("aria-pressed", running ? "true" : "false");
+  }
+  renderBookBadge(Date.now());
+}
+
+function showBookRun(book) {
+  if (!book) return;
+  bookRunId = book.id;
+  paintBookRun();
+}
+
+function paintUnitChoice() {
+  document.querySelectorAll("[data-unit-choice]").forEach((button) => {
+    const on = button.dataset.unitChoice === unitChoice;
+    button.setAttribute("aria-checked", on ? "true" : "false");
+    button.classList.toggle("is-on", on);
+  });
+  const label = $("book-unit-total-label");
+  if (!label) return;
+  if (unitChoice === "question") label.textContent = "全体の問数";
+  else if (unitChoice === "page") label.textContent = "全体のページ数";
+  else label.textContent = "全体の数";
+}
+
+function openUnitSheet(book) {
+  unitTargetId = book.id;
+  unitChoice = "";
+  const input = $("book-unit-total");
+  if (input) input.value = "";
+  paintUnitChoice();
+  $("book-unit-sheet").hidden = false;
+  $("book-unit-total").focus();
+}
+
+function closeUnitSheet() {
+  unitTargetId = "";
+  unitChoice = "";
+  const sheet = $("book-unit-sheet");
+  if (sheet) sheet.hidden = true;
+}
+
+function lockBookUnit() {
+  if (unitChoice !== "page" && unitChoice !== "question") {
+    toast("P. か 問 を選んでください");
+    return;
+  }
+  const total = Math.round(Number($("book-unit-total").value) || 0);
+  if (total < 1 || total > 9999) {
+    toast("1から9999までで入力してください");
+    return;
+  }
+  const id = unitTargetId;
+  const book = lookupBook(id);
+  if (!book) {
+    closeUnitSheet();
+    return;
+  }
+  if (!book.unit) {
+    book.unit = unitChoice;
+    book.total = total;
+    const saved = stateBox.data.books.find((item) => item.id === id);
+    if (saved && saved !== book && !saved.unit) {
+      saved.unit = unitChoice;
+      saved.total = total;
+    }
+    if (saved) save(stateBox.data);
+    else if (booksDraft && booksDraft.some((item) => item.id === id)) {
+      /* unit stays on the shelf draft until 変更を保存 */
+    }
+  }
+  closeUnitSheet();
+  renderBookShelf();
+  showBookRun(lookupBook(id));
+}
+
+function openRegisteredBook(id) {
+  if (bookRun && bookRun.bookId !== id) {
+    requestCloseBookRun(() => openRegisteredBook(id));
+    return;
+  }
+  const book = lookupBook(id);
+  if (!book) return;
+  if (!book.unit) {
+    openUnitSheet(book);
+    return;
+  }
+  showBookRun(book);
+}
+
+function toggleBookRun() {
+  if (!bookRunId) return;
+  if (bookRun && bookRun.bookId === bookRunId) {
+    const wrote = commitBookRun(Date.now());
+    paintBookRun();
+    if (wrote) toast("この教材に記録しました");
+    return;
+  }
+  if (bookRun) return;
+  if (session) {
+    toast("いまの計測を終えてから始めてください");
+    return;
+  }
+  bookRun = { bookId: bookRunId, startedAt: Date.now() };
+  startBookTicker();
+  paintBookRun();
+}
+
+function saveBookRun() {
+  const wrote = commitBookRun(Date.now());
+  closeBookRun();
+  renderBookShelf();
+  if (wrote) toast("学習時間を記録しました");
+}
+
+function requestCloseBookRun(after) {
+  if (bookRun) {
+    bookLeaveAction = after || null;
+    const sheet = $("book-stop-sheet");
+    if (sheet) {
+      sheet.hidden = false;
+      $("book-stop-yes").focus();
+    }
+    return;
+  }
+  closeBookRun();
+  if (after) after();
+}
+
+function confirmDiscardBookRun() {
+  bookRun = null;
+  stopBookTicker();
+  const after = bookLeaveAction;
+  bookLeaveAction = null;
+  const sheet = $("book-stop-sheet");
+  if (sheet) sheet.hidden = true;
+  closeBookRun();
+  renderBookBadge(Date.now());
+  renderBookShelf();
+  if (after) after();
+}
+
+function cancelDiscardBookRun() {
+  bookLeaveAction = null;
+  const sheet = $("book-stop-sheet");
+  if (sheet) sheet.hidden = true;
 }
 
 function fillSettings() {
@@ -665,39 +1410,6 @@ function fillSettings() {
   $("exam-fixed").textContent = formatJPDate(computeExamDate(tokyoToday()));
   $("weekly-hours").value = String(data.weeklyGoalHours);
   $("daily-questions").value = String(data.dailyQuestionGoal);
-}
-
-function readSubjectsFromForm() {
-  return {
-    main: {
-      choice: clamp(Math.round(Number($("main-choice-input").value) || 0), 0, 100),
-      written: clamp(Math.round(Number($("main-written-input").value) || 0), 0, 100)
-    },
-    minor: {
-      choice: clamp(Math.round(Number($("minor-choice-input").value) || 0), 0, 100),
-      written: clamp(Math.round(Number($("minor-written-input").value) || 0), 0, 100)
-    }
-  };
-}
-
-function commitRecord(extraMinutes) {
-  const data = stateBox.data;
-  materializeDemo(data);
-  const today = tokyoToday();
-  const rec = data.log[today] || { minutes: 0, questions: 0, carryMs: 0 };
-  const add = Math.max(0, Math.round(Number(extraMinutes) || 0));
-  const questions = clamp(Math.round(Number($("q-input").value) || 0), 0, 9999);
-  rec.minutes = Math.max(0, Math.round(Number(rec.minutes) || 0)) + add;
-  rec.questions = questions;
-  rec.carryMs = Math.max(0, Number(rec.carryMs) || 0);
-  delete rec.sample;
-  data.log[today] = rec;
-  data.subjects = readSubjectsFromForm();
-  if (add > 0) data.studied = true;
-  syncStreak(data, today);
-  save(data);
-  fillRecord();
-  renderHome();
 }
 
 let toastTimer = 0;
@@ -861,6 +1573,10 @@ function promptSessionEnd() {
 }
 
 function openStart(mode) {
+  if (bookRun) {
+    toast("教材の計測を止めてから始めてください");
+    return;
+  }
   if (session || !ENTRANCES[mode]) return;
   pendingEntrance = mode;
   $("start-mode").textContent = ENTRANCES[mode];
@@ -1159,7 +1875,11 @@ function renderRangeScreen(parent, kind) {
   parent.replaceChildren(screen);
 }
 
-function fileToImage(file) {
+function fileToImage(file, options) {
+  const opts = options || {};
+  const maxEdge = Math.max(32, Math.round(Number(opts.maxEdge) || 800));
+  const qualities = Array.isArray(opts.qualities) && opts.qualities.length ? opts.qualities : [0.65];
+  const maxChars = Math.max(0, Math.round(Number(opts.maxChars) || 0));
   return new Promise((resolve, reject) => {
     if (!file || !file.type || file.type.indexOf("image/") !== 0) {
       reject(new Error("type"));
@@ -1170,18 +1890,30 @@ function fileToImage(file) {
     reader.onload = () => {
       const img = new Image();
       img.onload = () => {
-        const max = 800;
-        let width = img.width || max;
-        let height = img.height || max;
-        const scale = Math.min(1, max / Math.max(width, height));
-        width = Math.max(1, Math.round(width * scale));
-        height = Math.max(1, Math.round(height * scale));
+        const longest = Math.max(img.width || maxEdge, img.height || maxEdge, 1);
+        const fit = Math.min(1, maxEdge / longest);
+        const baseW = Math.max(1, Math.round((img.width || maxEdge) * fit));
+        const baseH = Math.max(1, Math.round((img.height || maxEdge) * fit));
         const canvas = document.createElement("canvas");
-        canvas.width = width;
-        canvas.height = height;
         const ctx = canvas.getContext("2d");
-        ctx.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL("image/jpeg", 0.65));
+        const scales = maxChars ? [1, 0.85, 0.7, 0.55, 0.4] : [1];
+        let last = "";
+        for (let s = 0; s < scales.length; s += 1) {
+          const width = Math.max(1, Math.round(baseW * scales[s]));
+          const height = Math.max(1, Math.round(baseH * scales[s]));
+          canvas.width = width;
+          canvas.height = height;
+          ctx.drawImage(img, 0, 0, width, height);
+          for (let q = 0; q < qualities.length; q += 1) {
+            last = canvas.toDataURL("image/jpeg", qualities[q]);
+            if (!maxChars || last.length <= maxChars) {
+              resolve(last);
+              return;
+            }
+          }
+        }
+        if (maxChars && last.length > maxChars) reject(new Error("size"));
+        else resolve(last);
       };
       img.onerror = () => reject(new Error("img"));
       img.src = String(reader.result || "");
@@ -1806,6 +2538,13 @@ function handleAct(node) {
     rerenderRangeSurface();
   } else if (act === "save-ai") {
     commitAiDraft();
+  } else if (act === "add-book") {
+    openBookEditor(null);
+  } else if (act === "open-book") {
+    openRegisteredBook(node.dataset.id);
+  } else if (act === "edit-book") {
+    const book = ensureBooksDraft().find((item) => item.id === node.dataset.id);
+    if (book) openBookEditor(book);
   } else if (act === "confirm-range") {
     const kind = node.dataset.kind === "workbook" ? "workbook" : "text";
     const spec = rangeSpec(kind);
@@ -1870,6 +2609,11 @@ function bind() {
     navigateTo(document.getElementById("view-" + view) ? view : "home");
   }
 
+  function afterAiLeave(view, proceed) {
+    if (booksNeedConfirm() && view !== "record") requestLeaveBooks(proceed);
+    else proceed();
+  }
+
   window.addEventListener("hashchange", () => {
     if (hashGuard || discardSheetOpen()) return;
     const view = currentView();
@@ -1877,7 +2621,21 @@ function bind() {
       hashGuard = true;
       history.replaceState({ view: aiHostView() }, "", location.pathname + location.search + "#" + aiHostView());
       hashGuard = false;
-      requestLeaveAi(() => onRoute(view));
+      requestLeaveAi(() => afterAiLeave(view, () => onRoute(view)));
+      return;
+    }
+    if (bookRunId && view !== "record") {
+      hashGuard = true;
+      history.replaceState({ view: "record" }, "", location.pathname + location.search + "#record");
+      hashGuard = false;
+      requestCloseBookRun(() => navigateTo(view));
+      return;
+    }
+    if (booksNeedConfirm() && view !== "record") {
+      hashGuard = true;
+      history.replaceState({ view: "record" }, "", location.pathname + location.search + "#record");
+      hashGuard = false;
+      requestLeaveBooks(() => navigateTo(view));
       return;
     }
     onRoute(view);
@@ -1889,7 +2647,7 @@ function bind() {
       hashGuard = true;
       history.pushState({ view: aiHostView() }, "", location.pathname + location.search + "#" + aiHostView());
       hashGuard = false;
-      requestLeaveAi(() => {
+      requestLeaveAi(() => afterAiLeave(view, () => {
         if (session) {
           promptSessionEnd();
           return;
@@ -1899,6 +2657,40 @@ function bind() {
           return;
         }
         show(view);
+      }));
+      return;
+    }
+    if (bookRunId && view !== "record") {
+      hashGuard = true;
+      history.pushState({ view: "record" }, "", location.pathname + location.search + "#record");
+      hashGuard = false;
+      requestCloseBookRun(() => {
+        if (session) {
+          promptSessionEnd();
+          return;
+        }
+        if (view === "notes" || view === "speed" || view === "ox" || view === "text" || view === "workbook" || view === "guide") {
+          navigateTo("home", true);
+          return;
+        }
+        navigateTo(view);
+      });
+      return;
+    }
+    if (booksNeedConfirm() && view !== "record") {
+      hashGuard = true;
+      history.pushState({ view: "record" }, "", location.pathname + location.search + "#record");
+      hashGuard = false;
+      requestLeaveBooks(() => {
+        if (session) {
+          promptSessionEnd();
+          return;
+        }
+        if (view === "notes" || view === "speed" || view === "ox" || view === "text" || view === "workbook" || view === "guide") {
+          navigateTo("home", true);
+          return;
+        }
+        navigateTo(view);
       });
       return;
     }
@@ -1920,7 +2712,15 @@ function bind() {
       event.preventDefault();
       const view = href.slice(1);
       if (textPanel === "ai" && aiDirty) {
-        requestLeaveAi(() => leaveFor(view));
+        requestLeaveAi(() => afterAiLeave(view, () => leaveFor(view)));
+        return;
+      }
+      if (bookRunId) {
+        requestCloseBookRun(() => leaveFor(view));
+        return;
+      }
+      if (booksNeedConfirm() && view !== "record") {
+        requestLeaveBooks(() => leaveFor(view));
         return;
       }
       leaveFor(view);
@@ -1991,45 +2791,78 @@ function bind() {
 
   document.addEventListener("keydown", (event) => {
     if (event.key !== "Escape") return;
-    if (discardSheetOpen()) cancelDiscardAi();
+    const remove = $("book-delete-sheet");
+    const editor = $("book-sheet");
+    const stop = $("book-stop-sheet");
+    const unit = $("book-unit-sheet");
+    if (stop && !stop.hidden) cancelDiscardBookRun();
+    else if (unit && !unit.hidden) closeUnitSheet();
+    else if (remove && !remove.hidden) closeBookDelete();
+    else if (discardSheetOpen()) cancelDiscardAi();
+    else if (editor && !editor.hidden) closeBookEditor();
+    else if (bookRunId) requestCloseBookRun();
     else if (!$("start-sheet").hidden) closeStart();
     else if (!$("end-sheet").hidden) closeEndConfirm();
   });
 
-  document.querySelectorAll("[data-add]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const amount = Number(button.dataset.add);
-      commitRecord(amount);
-      toast(amount + "分を記録しました");
+  $("save-books").addEventListener("click", commitBooks);
+  $("book-apply").addEventListener("click", applyBookForm);
+  $("book-close").addEventListener("click", closeBookEditor);
+  $("book-delete").addEventListener("click", openBookDelete);
+  $("book-delete-yes").addEventListener("click", confirmBookDelete);
+  $("book-delete-no").addEventListener("click", closeBookDelete);
+  $("book-delete-sheet").addEventListener("click", (event) => {
+    if (event.target === $("book-delete-sheet")) closeBookDelete();
+  });
+  $("book-sheet").addEventListener("click", (event) => {
+    if (event.target === $("book-sheet")) closeBookEditor();
+  });
+  $("book-clear-image").addEventListener("click", () => {
+    if (!bookEditing) return;
+    bookEditing.image = "";
+    bookFormDirty = true;
+    const file = $("book-file");
+    if (file) file.value = "";
+    paintBookImage();
+  });
+  $("book-file").addEventListener("change", () => {
+    const file = $("book-file").files && $("book-file").files[0];
+    if (file) storeBookImage(file);
+  });
+  $("book-pick").addEventListener("paste", (event) => {
+    const items = event.clipboardData && event.clipboardData.items;
+    if (!items) return;
+    for (let i = 0; i < items.length; i += 1) {
+      if (items[i].type && items[i].type.indexOf("image/") === 0) {
+        event.preventDefault();
+        storeBookImage(items[i].getAsFile());
+        break;
+      }
+    }
+  });
+  ["book-title", "book-note"].forEach((id) => {
+    $(id).addEventListener("input", () => {
+      if (bookEditing) bookFormDirty = true;
     });
   });
 
-  $("add-custom").addEventListener("click", () => {
-    const amount = Math.round(Number($("add-minutes").value) || 0);
-    if (amount <= 0) {
-      toast("追加する分数を入力してください");
-      return;
-    }
-    commitRecord(clamp(amount, 1, 24 * 60));
-    toast(amount + "分を記録しました");
+  $("book-run-close").addEventListener("click", () => requestCloseBookRun());
+  $("book-run-save").addEventListener("click", saveBookRun);
+  $("book-run-toggle").addEventListener("click", toggleBookRun);
+  $("book-stop-yes").addEventListener("click", confirmDiscardBookRun);
+  $("book-stop-no").addEventListener("click", cancelDiscardBookRun);
+  $("book-stop-sheet").addEventListener("click", (event) => {
+    if (event.target === $("book-stop-sheet")) cancelDiscardBookRun();
   });
-
-  $("save-record").addEventListener("click", () => {
-    const typed = Math.round(Number($("add-minutes").value) || 0);
-    commitRecord(typed > 0 ? clamp(typed, 1, 24 * 60) : 0);
-    toast("記録しました");
+  $("book-unit-lock").addEventListener("click", lockBookUnit);
+  $("book-unit-cancel").addEventListener("click", closeUnitSheet);
+  $("book-unit-sheet").addEventListener("click", (event) => {
+    if (event.target === $("book-unit-sheet")) closeUnitSheet();
   });
-
-  $("q-dec").addEventListener("click", () => {
-    $("q-input").value = String(Math.max(0, Number($("q-input").value) - 1));
-  });
-  $("q-inc").addEventListener("click", () => {
-    $("q-input").value = String(Math.min(9999, Number($("q-input").value) + 1));
-  });
-
-  ["main-choice", "main-written", "minor-choice", "minor-written"].forEach((key) => {
-    $(key + "-input").addEventListener("input", () => {
-      $(key + "-val").textContent = $(key + "-input").value + "%";
+  document.querySelectorAll("[data-unit-choice]").forEach((button) => {
+    button.addEventListener("click", () => {
+      unitChoice = button.dataset.unitChoice === "question" ? "question" : "page";
+      paintUnitChoice();
     });
   });
 
@@ -2051,6 +2884,16 @@ function bind() {
     aiSaved = { text: null, workbook: null };
     aiDraft = null;
     aiDirty = false;
+    booksDraft = null;
+    bookEditing = null;
+    bookFormDirty = false;
+    bookRun = null;
+    bookRunId = "";
+    bookLeaveAction = null;
+    stopBookTicker();
+    closeBookRun();
+    closeUnitSheet();
+    closeBookSheets();
     stateBox.data = seed();
     save(stateBox.data);
     fillSettings();
@@ -2059,13 +2902,16 @@ function bind() {
   });
 
   document.addEventListener("visibilitychange", () => {
-    if (!session) {
-      if (document.visibilityState === "visible") renderHome();
+    if (document.visibilityState === "hidden") {
+      if (bookRun) checkpointBookRun(Date.now());
+      if (session) flushSession(Date.now(), false);
       return;
     }
-    if (document.visibilityState === "hidden") flushSession(Date.now(), false);
+    if (bookRunId) paintBookRun();
+    if (!session) renderHome();
   });
   window.addEventListener("pagehide", () => {
+    if (bookRun) checkpointBookRun(Date.now());
     if (session) flushSession(Date.now(), false);
   });
 }
@@ -2085,6 +2931,8 @@ function refreshAfterCloud() {
   if (view === "ox") renderOxDock();
   if (sessionShowsTimer(view)) renderStudyChrome(presentSession(session, Date.now()));
   else if (!session) hideStudyChrome();
+  if (bookRunId) paintBookRun();
+  else if (bookRun) renderBookBadge(Date.now());
 }
 
 function adoptCloudSession(data) {
@@ -2109,6 +2957,7 @@ function adoptCloudSession(data) {
 }
 
 function applyCloudState(raw) {
+  const dirtyBooks = bookFormDirty || (booksDraft != null && !booksEqual(savedBooks(), booksDraft));
   const data = normalize(raw);
   settle(data);
   cloudQuiet = true;
@@ -2118,6 +2967,16 @@ function applyCloudState(raw) {
     save(data);
   } finally {
     cloudQuiet = false;
+  }
+  if (!dirtyBooks) booksDraft = null;
+  if (bookRun && session) {
+    bookRun = null;
+    stopBookTicker();
+    bookLeaveAction = null;
+    const stop = $("book-stop-sheet");
+    if (stop) stop.hidden = true;
+    closeBookRun();
+    toast("別の計測が続いているため、教材の計測を止めました");
   }
   const view = currentView();
   if (session && !routeAllowed(view)) {
@@ -2212,6 +3071,13 @@ if (typeof module !== "undefined" && module.exports) {
     normalizeAiSlots,
     aiSlotsDirty,
     AI_KEYS,
-    aiStorageKey
+    aiStorageKey,
+    BOOK_LIMIT,
+    normalizeBooks,
+    booksEqual,
+    emptyBookSlots,
+    normalize,
+    bookGauge,
+    bookGaugeLabel
   };
 }

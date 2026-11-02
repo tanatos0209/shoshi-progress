@@ -73,6 +73,26 @@ test("untouched demo loses to any cloud record and does not upload", () => {
   assert.equal(isUntouchedDemo({ demo: false, studied: false }), false);
   assert.equal(isUntouchedDemo({ demo: true, studied: true }), false);
   assert.equal(isUntouchedDemo({ demo: true, studied: false, activeSession: { mode: "text" } }), false);
+  assert.equal(isUntouchedDemo({
+    demo: true,
+    studied: false,
+    activeSession: null,
+    books: [{ title: "Vマジック" }]
+  }), false);
+  assert.equal(isUntouchedDemo({
+    demo: true,
+    studied: false,
+    activeSession: null,
+    books: [{ title: "  " }]
+  }), true);
+  const withBooks = noteLocalChange({}, "state", {
+    demo: true,
+    studied: false,
+    activeSession: null,
+    books: [{ title: "Vマジック" }]
+  }, 1000);
+  assert.equal(withBooks.push, true);
+  assert.equal(withBooks.stamp, 1000);
   const first = noteLocalChange({}, "state", demo, 1000);
   assert.equal(first.stamp, 0);
   assert.equal(first.push, false);
