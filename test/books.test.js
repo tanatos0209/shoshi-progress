@@ -67,14 +67,15 @@ test("oversized cover images are dropped and drafts compare field by field", () 
   assert.equal(booksEqual([], null), true);
 });
 
-test("empty add slots fill the row and stop at 25", () => {
-  assert.equal(emptyBookSlots(0), 4);
-  assert.equal(emptyBookSlots(1), 3);
-  assert.equal(emptyBookSlots(8), 4);
-  assert.equal(emptyBookSlots(23), 1);
+test("empty add slots show every remaining place up to 25", () => {
+  assert.equal(emptyBookSlots(0), 25);
+  assert.equal(emptyBookSlots(1), 24);
+  assert.equal(emptyBookSlots(8), 17);
+  assert.equal(emptyBookSlots(23), 2);
   assert.equal(emptyBookSlots(24), 1);
   assert.equal(emptyBookSlots(25), 0);
   assert.equal(emptyBookSlots(40), 0);
+  assert.equal(emptyBookSlots(1) + 1, BOOK_LIMIT);
 });
 
 test("a book's unit locks and the gauge reads PCS only when the subject matches", () => {

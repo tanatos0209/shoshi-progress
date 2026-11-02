@@ -292,11 +292,7 @@ function booksEqual(a, b) {
 
 function emptyBookSlots(count) {
   const n = Math.max(0, Math.min(BOOK_LIMIT, Math.round(Number(count) || 0)));
-  if (n >= BOOK_LIMIT) return 0;
-  const remain = BOOK_LIMIT - n;
-  const pad = (4 - (n % 4)) % 4;
-  const want = pad === 0 ? 4 : pad;
-  return Math.min(remain, want);
+  return BOOK_LIMIT - n;
 }
 
 function coverInk(color) {
@@ -882,7 +878,10 @@ function closeBookSheets() {
   const editor = $("book-sheet");
   const remove = $("book-delete-sheet");
   const file = $("book-file");
-  if (editor) editor.hidden = true;
+  if (editor) {
+    editor.hidden = true;
+    delete editor.dataset.mode;
+  }
   if (remove) remove.hidden = true;
   if (file) file.value = "";
 }
@@ -903,6 +902,16 @@ function bookCover(book, className) {
   return cover;
 }
 
+function bookEditButton(book) {
+  const edit = el("button", "book-edit");
+  edit.type = "button";
+  edit.dataset.act = "edit-book";
+  edit.dataset.id = book.id;
+  edit.setAttribute("aria-label", book.title + "を編集");
+  edit.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 19.5 5.8 15 16.2 4.6a1.7 1.7 0 0 1 2.4 0l.8.8a1.7 1.7 0 0 1 0 2.4L9 18.2 4.5 19.5z"/><path d="M14 6.8 17.2 10"/></svg>';
+  return edit;
+}
+
 function bookTile(book) {
   const wrap = el("div", "book-tile");
   const open = el("button", "book-open");
@@ -914,12 +923,7 @@ function bookTile(book) {
   caption.append(el("b", "", book.title));
   if (book.note) caption.append(el("small", "", book.note));
   open.append(bookCover(book, "book-cover"), caption);
-  const edit = el("button", "book-edit", "編集");
-  edit.type = "button";
-  edit.dataset.act = "edit-book";
-  edit.dataset.id = book.id;
-  edit.setAttribute("aria-label", book.title + "を編集");
-  wrap.append(open, edit);
+  wrap.append(open, bookEditButton(book));
   return wrap;
 }
 
@@ -931,44 +935,43 @@ function addBookTile() {
   return btn;
 }
 
-function renderBookShelf() {
+function renderBookShelf(revealId) {
   const books = ensureBooksDraft();
   const count = $("book-count");
   if (count) count.textContent = String(books.length);
   const grid = $("book-grid");
   if (!grid) return;
+  const scroll = grid.scrollTop;
   grid.replaceChildren();
   books.forEach((book) => grid.append(bookTile(book)));
   const empties = emptyBookSlots(books.length);
   for (let i = 0; i < empties; i += 1) grid.append(addBookTile());
+  if (revealId) revealBookTile(revealId);
+  else grid.scrollTop = scroll;
+}
+
+function revealBookTile(id) {
+  const grid = $("book-grid");
+  if (!grid || !id) return;
+  let open = null;
+  const tiles = grid.querySelectorAll(".book-open");
+  for (let i = 0; i < tiles.length; i += 1) {
+    if (tiles[i].dataset.id === id) {
+      open = tiles[i];
+      break;
+    }
+  }
+  if (!open) return;
+  const gridBox = grid.getBoundingClientRect();
+  const box = open.getBoundingClientRect();
+  if (box.top < gridBox.top) grid.scrollTop -= gridBox.top - box.top;
+  else if (box.bottom > gridBox.bottom) grid.scrollTop += box.bottom - gridBox.bottom;
 }
 
 function fillRecord() {
   const date = $("record-date");
   if (date) date.textContent = formatJPDate(tokyoToday());
   renderBookShelf();
-}
-
-function paintBookColors() {
-  const wrap = $("book-colors");
-  if (!wrap || !bookEditing) return;
-  wrap.replaceChildren();
-  BOOK_COLORS.forEach((color) => {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "book-swatch";
-    btn.style.background = color;
-    btn.setAttribute("role", "radio");
-    btn.setAttribute("aria-checked", bookEditing.color === color ? "true" : "false");
-    btn.setAttribute("aria-label", "色");
-    btn.addEventListener("click", () => {
-      if (!bookEditing) return;
-      bookEditing.color = color;
-      bookFormDirty = true;
-      paintBookColors();
-    });
-    wrap.append(btn);
-  });
 }
 
 function paintBookImage() {
@@ -1007,16 +1010,18 @@ function openBookEditor(book) {
   };
   bookEditing.isNew = isNew;
   bookFormDirty = false;
-  $("book-sheet-title").textContent = isNew ? "教材を追加" : "教材を編集";
+  const sheet = $("book-sheet");
+  if (sheet) sheet.dataset.mode = isNew ? "add" : "edit";
+  $("book-sheet-title").textContent = "教材（追加・編集）";
   $("book-title").value = bookEditing.title;
   $("book-note").value = bookEditing.note;
-  $("book-apply").textContent = isNew ? "一覧に追加" : "一覧に反映";
+  $("book-apply").textContent = "保存";
   $("book-delete").hidden = isNew;
   const file = $("book-file");
   if (file) file.value = "";
   paintBookImage();
-  paintBookColors();
-  $("book-sheet").hidden = false;
+  if (!sheet) return;
+  sheet.hidden = false;
   $("book-title").focus();
 }
 
@@ -1025,7 +1030,10 @@ function closeBookEditor() {
   bookFormDirty = false;
   const sheet = $("book-sheet");
   const file = $("book-file");
-  if (sheet) sheet.hidden = true;
+  if (sheet) {
+    sheet.hidden = true;
+    delete sheet.dataset.mode;
+  }
   if (file) file.value = "";
 }
 
@@ -1067,8 +1075,9 @@ function applyBookForm() {
   };
   if (index >= 0) draft[index] = stored;
   else draft.push(stored);
+  const revealId = stored.id;
   closeBookEditor();
-  renderBookShelf();
+  renderBookShelf(revealId);
   return true;
 }
 
@@ -1111,7 +1120,7 @@ function storeBookImage(file) {
 function commitBooks() {
   const editor = $("book-sheet");
   if (editor && !editor.hidden) {
-    toast("開いている教材を一覧へ反映してください");
+    toast("先に「保存」か「閉じる」を押してください");
     return;
   }
   if (!booksDraft || booksEqual(savedBooks(), booksDraft)) {

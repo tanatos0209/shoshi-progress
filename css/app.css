@@ -2018,6 +2018,20 @@ input[type="range"].text-range::-moz-range-thumb {
   gap: 14px 8px;
   margin-top: 14px;
   align-items: start;
+  max-height: min(420px, 48svh);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 2px 2px 8px;
+  scrollbar-color: rgba(232, 197, 106, 0.55) transparent;
+  scrollbar-width: thin;
+}
+
+.book-grid::-webkit-scrollbar { width: 6px; }
+
+.book-grid::-webkit-scrollbar-thumb {
+  background: rgba(232, 197, 106, 0.55);
+  border-radius: 999px;
 }
 
 .book-tile,
@@ -2049,20 +2063,34 @@ input[type="range"].text-range::-moz-range-thumb {
 }
 
 .book-edit {
-  display: block;
-  width: 100%;
-  margin-top: 2px;
-  border: 0;
+  position: absolute;
+  z-index: 2;
+  top: 3px;
+  right: 3px;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid rgba(232, 197, 106, 0.9);
   border-radius: 999px;
-  padding: 2px 4px;
-  background: transparent;
-  color: #cbb892;
-  font: inherit;
-  font-size: 10px;
-  font-weight: 800;
-  line-height: 1.4;
-  text-decoration: underline;
-  text-underline-offset: 2px;
+  background: rgba(3, 21, 15, 0.78);
+  color: #f0d56a;
+  line-height: 0;
+}
+
+.book-open:focus-visible,
+.book-add:focus-visible,
+.book-edit:focus-visible {
+  outline: 2px solid #f0d56a;
+  outline-offset: 2px;
+}
+
+.book-edit svg {
+  width: 14px;
+  height: 14px;
+  display: block;
 }
 
 .book-cover,
@@ -2246,38 +2274,22 @@ input[type="range"].text-range::-moz-range-thumb {
   cursor: pointer;
 }
 
-.book-colors {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.book-swatch {
-  width: 32px;
-  height: 32px;
-  padding: 0;
-  border-radius: 50%;
-  border: 2px solid transparent;
-  cursor: pointer;
-}
-
-.book-swatch[aria-checked="true"] {
-  border-color: #fff6d0;
-  box-shadow: 0 0 0 2px #c9962e;
-}
-
-.book-hint { text-align: center; }
-
-.book-actions { margin-top: 12px; }
+.book-actions { margin-top: 16px; }
 
 .book-actions .tbtn {
   min-height: 48px;
   font-size: 15px;
 }
 
-.book-delete {
-  color: #ffb4b4;
-  border-color: rgba(255, 140, 140, 0.55);
+.book-sheet-card .book-delete {
+  display: block;
+  width: auto;
+  min-width: 148px;
+  margin: 14px auto 0;
+  padding: 0 28px;
+  color: #f6e7b0;
+  background: #0c2a1c;
+  border-color: rgba(212, 175, 90, 0.7);
 }
 
 .book-run {
