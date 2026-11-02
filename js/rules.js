@@ -180,6 +180,46 @@ const ProgressRules = (function () {
     return endMs - startMs;
   }
 
+  function bookTimeOf(log, iso, bookId) {
+    const rec = log && log[iso];
+    const bag = rec && rec.bookTime;
+    const item = bag && bookId ? bag[bookId] : null;
+    return {
+      minutes: Math.max(0, Math.round(Number(item && item.minutes) || 0)),
+      carryMs: Math.max(0, Number(item && item.carryMs) || 0)
+    };
+  }
+
+  function addBookStudyMs(data, iso, bookId, ms) {
+    if (!(ms > 0) || !bookId) return;
+    const rec = ensureDay(data, iso);
+    if (!rec.bookTime || typeof rec.bookTime !== "object") rec.bookTime = {};
+    const prev = rec.bookTime[bookId] || {};
+    const total = Math.max(0, Number(prev.carryMs) || 0) + ms;
+    const addMin = Math.floor(total / 60000);
+    rec.bookTime[bookId] = {
+      minutes: Math.max(0, Math.round(Number(prev.minutes) || 0)) + addMin,
+      carryMs: total - addMin * 60000
+    };
+  }
+
+  /* Same midnight split as addStudySpan, stored per book on that day's log. */
+  function addBookStudySpan(data, bookId, startMs, endMs) {
+    if (!bookId || !(endMs > startMs)) return 0;
+    let cursor = startMs;
+    let guard = 0;
+    while (cursor < endMs && guard < 4000) {
+      const iso = tokyoDateFromMs(cursor);
+      const boundary = tokyoMidnightMs(addDays(iso, 1));
+      const sliceEnd = Math.min(endMs, boundary);
+      if (!(sliceEnd > cursor)) break;
+      addBookStudyMs(data, iso, bookId, sliceEnd - cursor);
+      cursor = sliceEnd;
+      guard += 1;
+    }
+    return endMs - startMs;
+  }
+
   function createSession(mode, now) {
     return {
       mode,
@@ -444,6 +484,9 @@ const ProgressRules = (function () {
     tokyoMidnightMs,
     addStudyMs,
     addStudySpan,
+    bookTimeOf,
+    addBookStudyMs,
+    addBookStudySpan,
     createSession,
     liveSetMs,
     tickSession,

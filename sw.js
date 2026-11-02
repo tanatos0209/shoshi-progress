@@ -1,13 +1,13 @@
-const CACHE = "shoshi-progress-v14";
+const CACHE = "shoshi-progress-v16";
 const SHELL = [
   "./",
   "./index.html",
-  "./css/app.css?v=14",
-  "./js/firebase-config.js?v=14",
-  "./js/rules.js?v=14",
-  "./js/pcs.js?v=14",
-  "./js/sync.js?v=14",
-  "./js/app.js?v=14",
+  "./css/app.css?v=16",
+  "./js/firebase-config.js?v=16",
+  "./js/rules.js?v=16",
+  "./js/pcs.js?v=16",
+  "./js/sync.js?v=16",
+  "./js/app.js?v=16",
   "./manifest.webmanifest",
   "./favicon.ico",
   "./favicon-32.png",

@@ -17,7 +17,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&display=swap" rel="stylesheet"/>
-<link rel="stylesheet" href="css/app.css?v=14"/>
+<link rel="stylesheet" href="css/app.css?v=16"/>
 <style>html,body{background:#03150f}</style>
 </head>
 <body>
@@ -203,45 +203,15 @@
     <section id="view-record" class="view" hidden>
       <header class="subhead"><h1>記録する</h1></header>
       <p class="lead" id="record-date"></p>
-      <section class="card">
-        <p class="block-label">今日の学習時間</p>
-        <p class="now gold-text" id="record-now">0時間0分</p>
-        <p class="hint">ボタンを押すと、その場で今日の時間に足します。</p>
-        <div class="chips" style="margin-top:10px">
-          <button type="button" class="chip" data-add="15">+15分</button>
-          <button type="button" class="chip" data-add="30">+30分</button>
-          <button type="button" class="chip" data-add="60">+1時間</button>
-        </div>
-        <div class="add-row" style="margin-top:10px">
-          <input id="add-minutes" type="number" inputmode="numeric" min="1" max="1440" placeholder="分を入力"/>
-          <button type="button" class="ghost" id="add-custom">追加</button>
-        </div>
+      <section class="card shelf-card" aria-labelledby="shelf-title">
+        <h2 id="shelf-title" class="shelf-title">テキスト・教材</h2>
+        <p class="shelf-note">最大25冊・タップで記録</p>
+        <p class="shelf-count">登録 <b id="book-count">0</b>/25</p>
+        <div id="book-grid" class="book-grid" aria-label="テキスト・教材"></div>
       </section>
-      <section class="card">
-        <p class="block-label">今日の問題数 <span id="record-questions"></span>問</p>
-        <div class="stepper" style="margin-top:10px">
-          <button type="button" id="q-dec" aria-label="1問減らす">−</button>
-          <input id="q-input" type="number" inputmode="numeric" min="0" max="9999" value="6"/>
-          <button type="button" id="q-inc" aria-label="1問増やす">＋</button>
-        </div>
-        <div class="slider-row">
-          <span><label for="main-choice-input">メイン科目 択一</label><b id="main-choice-val">18%</b></span>
-          <input id="main-choice-input" type="range" min="0" max="100" value="18"/>
-        </div>
-        <div class="slider-row">
-          <span><label for="main-written-input">メイン科目 記述</label><b id="main-written-val">0%</b></span>
-          <input id="main-written-input" type="range" min="0" max="100" value="0"/>
-        </div>
-        <div class="slider-row">
-          <span><label for="minor-choice-input">マイナー科目 択一</label><b id="minor-choice-val">5%</b></span>
-          <input id="minor-choice-input" type="range" min="0" max="100" value="5"/>
-        </div>
-        <div class="slider-row">
-          <span><label for="minor-written-input">マイナー科目 記述</label><b id="minor-written-val">0%</b></span>
-          <input id="minor-written-input" type="range" min="0" max="100" value="0"/>
-        </div>
-        <button type="button" class="btn-gold" id="save-record">問題数と科目を保存</button>
-      </section>
+      <div class="shelf-save">
+        <button type="button" class="btn-gold" id="save-books">変更を保存</button>
+      </div>
     </section>
 
     <section id="view-perfect" class="view" hidden>
@@ -280,7 +250,7 @@
         <h2 class="sync-title">クラウド同期</h2>
         <p id="sync-status" class="sync-status" aria-live="polite">確認しています</p>
         <p id="sync-account" class="sync-account" hidden></p>
-        <p id="sync-detail" class="hint">進捗、PCS、テキストと問題集のAIサポート、タイマー、設定を、同じGoogleアカウントの端末どうしで同期します。</p>
+        <p id="sync-detail" class="hint">進捗、PCS、テキスト・教材、テキストと問題集のAIサポート、タイマー、設定を、同じGoogleアカウントの端末どうしで同期します。</p>
         <button type="button" class="btn-gold" id="sync-sign-in"><span class="g-mark" aria-hidden="true">G</span>Googleでログイン</button>
         <button type="button" class="btn-quiet" id="sync-now" hidden>今すぐ同期</button>
         <button type="button" class="btn-quiet" id="sync-claim" hidden>このアカウントに、この端末の記録を保存</button>
@@ -411,11 +381,104 @@
 <div id="ai-discard-sheet" class="sheet" hidden>
   <div class="sheet-card" role="dialog" aria-modal="true" aria-labelledby="ai-discard-title">
     <h2 id="ai-discard-title">変更を破棄しますか？</h2>
-    <p class="sheet-mode">保存していない画像とメモは残しません。</p>
+    <p id="ai-discard-copy" class="sheet-mode">保存していない画像とメモは残しません。</p>
     <div class="sheet-actions">
       <button type="button" id="ai-discard-yes" class="tbtn tbtn-end">破棄する</button>
       <button type="button" id="ai-discard-no" class="tbtn tbtn-ghost">戻る</button>
     </div>
+  </div>
+</div>
+<div id="book-sheet" class="sheet" hidden>
+  <div class="sheet-card book-sheet-card" role="dialog" aria-modal="true" aria-labelledby="book-sheet-title">
+    <h2 id="book-sheet-title">教材を追加</h2>
+    <div class="book-field">
+      <label for="book-title">タイトル</label>
+      <input id="book-title" type="text" maxlength="40" autocomplete="off" placeholder="教材名"/>
+    </div>
+    <div class="book-field">
+      <label for="book-note">メモ（任意）</label>
+      <input id="book-note" type="text" maxlength="80" autocomplete="off" placeholder="科目・巻など"/>
+    </div>
+    <div class="book-field">
+      <span class="book-label" id="book-image-label">表紙画像（任意）</span>
+      <div class="book-pick-wrap">
+        <label class="book-pick" id="book-pick">
+          <span class="book-pick-ph" id="book-pick-ph">画像を選ぶ</span>
+          <img id="book-pick-img" alt="" hidden/>
+          <input id="book-file" type="file" accept="image/*" aria-labelledby="book-image-label"/>
+        </label>
+        <button type="button" id="book-clear-image" class="ai-x" hidden aria-label="表紙画像を消す">×</button>
+      </div>
+    </div>
+    <div class="book-field">
+      <span class="book-label">色</span>
+      <div id="book-colors" class="book-colors" role="radiogroup" aria-label="色"></div>
+    </div>
+    <p class="hint book-hint">一覧へ反映します。この端末へ残すには「変更を保存」を押します。</p>
+    <div class="sheet-actions book-actions">
+      <button type="button" id="book-apply" class="tbtn tbtn-gold">一覧に追加</button>
+      <button type="button" id="book-close" class="tbtn tbtn-ghost">閉じる</button>
+    </div>
+    <button type="button" id="book-delete" class="btn-quiet book-delete" hidden>削除する</button>
+  </div>
+</div>
+<div id="book-delete-sheet" class="sheet" hidden>
+  <div class="sheet-card" role="dialog" aria-modal="true" aria-labelledby="book-delete-title">
+    <h2 id="book-delete-title">この教材を削除しますか？</h2>
+    <p class="sheet-mode" id="book-delete-name"></p>
+    <p class="hint">一覧から外します。画面下の「変更を保存」で確定します。</p>
+    <div class="sheet-actions">
+      <button type="button" id="book-delete-yes" class="tbtn tbtn-end">削除する</button>
+      <button type="button" id="book-delete-no" class="tbtn tbtn-ghost">戻る</button>
+    </div>
+  </div>
+</div>
+<div id="book-unit-sheet" class="sheet" hidden>
+  <div class="sheet-card book-sheet-card" role="dialog" aria-modal="true" aria-labelledby="book-unit-title">
+    <h2 id="book-unit-title">単位を決める</h2>
+    <p class="sheet-mode">一度決めると、この教材では変えられません。</p>
+    <div class="book-unit-choices" role="radiogroup" aria-label="単位">
+      <button type="button" class="book-unit-choice" data-unit-choice="page" role="radio" aria-checked="false">P.</button>
+      <button type="button" class="book-unit-choice" data-unit-choice="question" role="radio" aria-checked="false">問</button>
+    </div>
+    <div class="book-field">
+      <label id="book-unit-total-label" for="book-unit-total">全体の数</label>
+      <input id="book-unit-total" type="number" inputmode="numeric" min="1" max="9999" placeholder="例: 320"/>
+    </div>
+    <div class="sheet-actions">
+      <button type="button" id="book-unit-lock" class="tbtn tbtn-gold">この単位で確定</button>
+      <button type="button" id="book-unit-cancel" class="tbtn tbtn-ghost">閉じる</button>
+    </div>
+  </div>
+</div>
+<div id="book-stop-sheet" class="sheet" hidden>
+  <div class="sheet-card" role="dialog" aria-modal="true" aria-labelledby="book-stop-title">
+    <h2 id="book-stop-title">計測をやめますか？</h2>
+    <p class="sheet-mode">いまの計測は記録しません。</p>
+    <div class="sheet-actions">
+      <button type="button" id="book-stop-yes" class="tbtn tbtn-end">やめる</button>
+      <button type="button" id="book-stop-no" class="tbtn tbtn-ghost">続ける</button>
+    </div>
+  </div>
+</div>
+<div id="book-run" class="book-run" hidden>
+  <div class="book-run-frame">
+    <header class="book-run-bar">
+      <button type="button" id="book-run-close" class="book-run-x" aria-label="閉じる">×</button>
+      <h1>記録の入力</h1>
+      <button type="button" id="book-run-save" class="book-run-commit">記録</button>
+    </header>
+    <div id="book-run-cover" class="book-run-cover"></div>
+    <button type="button" id="book-run-toggle" class="btn-gold book-run-toggle" aria-pressed="false">スタート</button>
+    <div class="book-gauge">
+      <div class="book-gauge-labels"><span>現在</span><span>全体</span></div>
+      <p id="book-run-fraction" class="book-fraction">P.0 / P.0</p>
+      <div class="book-gauge-track" aria-hidden="true"><span id="book-run-fill"></span></div>
+    </div>
+    <section class="book-today-card" aria-label="この教材・今日">
+      <p>この教材・今日</p>
+      <p id="book-run-today">0時間0分</p>
+    </section>
   </div>
 </div>
 <div id="start-sheet" class="sheet" hidden>
@@ -437,10 +500,10 @@
     </div>
   </div>
 </div>
-<script src="js/firebase-config.js?v=14"></script>
-<script src="js/rules.js?v=14"></script>
-<script src="js/pcs.js?v=14"></script>
-<script src="js/sync.js?v=14"></script>
-<script src="js/app.js?v=14"></script>
+<script src="js/firebase-config.js?v=16"></script>
+<script src="js/rules.js?v=16"></script>
+<script src="js/pcs.js?v=16"></script>
+<script src="js/sync.js?v=16"></script>
+<script src="js/app.js?v=16"></script>
 </body>
 </html>
