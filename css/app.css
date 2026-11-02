@@ -751,6 +751,36 @@ input[type="range"] {
   line-height: 1.5;
 }
 
+.today-edit-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.today-edit-row label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--cream);
+}
+
+.today-edit-row input {
+  width: 100%;
+  background: #07160f;
+  color: #fff;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px;
+  font-size: 16px;
+}
+
+#today-edit-save:disabled {
+  opacity: 0.45;
+}
+
 .ph {
   min-height: calc(100dvh - 150px);
   display: flex;
@@ -1260,6 +1290,12 @@ body.is-ox .content {
   font-weight: 900;
   font-size: 14px;
   font-variant-numeric: tabular-nums;
+}
+
+.measure-badge.is-paused {
+  background: linear-gradient(180deg, #f8e7b0 0%, #e8c15a 46%, #c9962e 100%);
+  color: #3a2c0c;
+  box-shadow: 0 4px 14px rgba(201, 150, 46, 0.4);
 }
 
 body.is-ox .measure-badge {
@@ -2359,6 +2395,15 @@ input[type="range"].text-range::-moz-range-thumb {
 }
 
 .book-run-toggle { margin-top: 0; }
+
+.book-run-status {
+  margin: 10px 0 0;
+  text-align: center;
+  color: var(--gold);
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.5;
+}
 
 .book-run-toggle.is-stop {
   color: #fff6d4;

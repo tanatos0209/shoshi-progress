@@ -15,10 +15,15 @@ const {
   addStudySpan,
   addBookStudySpan,
   bookTimeOf,
+  removeStudyMs,
+  setDayStudyMinutes,
   formatElapsed,
   createSession,
   tickSession,
+  holdSession,
+  parkOpenSession,
   resumeSession,
+  addCredit,
   startBreak,
   confirmNextSet,
   detachSpans,
@@ -71,6 +76,10 @@ let bookRun = null;
 let bookRunId = "";
 let bookTicker = 0;
 let bookLeaveAction = null;
+let lastVisibleAt = Date.now();
+let backgroundParked = false;
+const AWAY_MS = 15000;
+const PARK_KEY = "shoshi-progress-parked";
 let unitTargetId = "";
 let unitChoice = "";
 const AI_KEYS = {
@@ -845,9 +854,12 @@ function show(view) {
     document.body.classList.remove("is-guide-ox");
   }
   renderHome();
-  if (sessionShowsTimer(view)) renderStudyChrome(presentSession(session, Date.now()));
-  else hideStudyChrome();
-  if (bookRun && !(session && sessionShowsTimer(view))) renderBookBadge(Date.now());
+  if (session && (sessionShowsTimer(view) || session.phase === "paused")) {
+    renderStudyChrome(presentSession(session, Date.now()));
+  } else {
+    hideStudyChrome();
+  }
+  if (bookRun && !(session && (sessionShowsTimer(view) || session.phase === "paused"))) renderBookBadge(Date.now());
   if (view === "today") renderToday();
   if (view === "guide") renderGuide();
   if (view === "notes") renderNotes();
@@ -1158,7 +1170,9 @@ function todayPlan(data) {
 function bookTodayMs(bookId, now) {
   const stored = bookTimeOf(stateBox.data && stateBox.data.log, tokyoToday(), bookId);
   let ms = stored.minutes * 60000 + stored.carryMs;
-  if (bookRun && bookRun.bookId === bookId && now > bookRun.startedAt) ms += now - bookRun.startedAt;
+  if (bookRun && bookRun.bookId === bookId && !bookRun.paused && bookRun.startedAt > 0 && now > bookRun.startedAt) {
+    ms += now - bookRun.startedAt;
+  }
   return ms;
 }
 
@@ -1170,19 +1184,32 @@ function stopBookTicker() {
 function renderBookBadge(now) {
   const badge = $("measure-badge");
   if (!badge) return;
-  if (session && sessionShowsTimer(currentView())) return;
+  if (session && (sessionShowsTimer(currentView()) || session.phase === "paused")) return;
   if (!bookRun) {
-    if (!session) badge.hidden = true;
+    if (!session) {
+      badge.hidden = true;
+      badge.classList.remove("is-paused");
+    }
     return;
   }
   badge.hidden = false;
+  const label = $("measure-label");
+  if (bookRun.paused || !(bookRun.startedAt > 0)) {
+    badge.classList.add("is-paused");
+    if (label) label.textContent = "一時停止中";
+    $("measure-clock").textContent = "";
+    return;
+  }
+  badge.classList.remove("is-paused");
+  if (label) label.textContent = "計測中";
   $("measure-clock").textContent = formatElapsed(Math.max(0, now - bookRun.startedAt));
 }
 
 function startBookTicker() {
   stopBookTicker();
   const frame = () => {
-    if (!bookRun) return;
+    if (!bookRun || bookRun.paused) return;
+    if (catchAway(Date.now())) return;
     const now = Date.now();
     renderBookBadge(now);
     if (bookRunId) paintBookRun();
@@ -1210,6 +1237,12 @@ function writeBookSpan(id, start, now) {
 
 function commitBookRun(now) {
   if (!bookRun) return false;
+  if (bookRun.paused || !(bookRun.startedAt > 0)) {
+    bookRun = null;
+    stopBookTicker();
+    renderBookBadge(now);
+    return false;
+  }
   const start = bookRun.startedAt;
   const id = bookRun.bookId;
   bookRun = null;
@@ -1219,13 +1252,16 @@ function commitBookRun(now) {
   return wrote;
 }
 
-function checkpointBookRun(now) {
-  if (!bookRun) return;
+function pauseBookRun(now) {
+  if (!bookRun || bookRun.paused || !(bookRun.startedAt > 0)) return false;
   const start = bookRun.startedAt;
   const id = bookRun.bookId;
-  if (!(now > start)) return;
-  writeBookSpan(id, start, now);
-  if (bookRun && bookRun.bookId === id) bookRun.startedAt = now;
+  bookRun = { bookId: id, startedAt: 0, paused: true };
+  stopBookTicker();
+  if (now > start) writeBookSpan(id, start, now);
+  renderBookBadge(now);
+  if (bookRunId) paintBookRun();
+  return true;
 }
 
 function closeBookRun() {
@@ -1263,12 +1299,15 @@ function paintBookRun() {
   const today = $("book-run-today");
   if (today) today.textContent = formatDuration(Math.floor(bookTodayMs(book.id, Date.now()) / 60000));
   const toggle = $("book-run-toggle");
-  const running = !!(bookRun && bookRun.bookId === book.id);
+  const running = !!(bookRun && bookRun.bookId === book.id && !bookRun.paused && bookRun.startedAt > 0);
+  const pausedHere = !!(bookRun && bookRun.bookId === book.id && bookRun.paused);
   if (toggle) {
     toggle.textContent = running ? "ストップ" : "スタート";
     toggle.classList.toggle("is-stop", running);
     toggle.setAttribute("aria-pressed", running ? "true" : "false");
   }
+  const status = $("book-run-status");
+  if (status) status.hidden = !pausedHere;
   renderBookBadge(Date.now());
 }
 
@@ -1358,31 +1397,33 @@ function openRegisteredBook(id) {
 
 function toggleBookRun() {
   if (!bookRunId) return;
-  if (bookRun && bookRun.bookId === bookRunId) {
+  if (bookRun && bookRun.bookId === bookRunId && !bookRun.paused && bookRun.startedAt > 0) {
     const wrote = commitBookRun(Date.now());
     paintBookRun();
     if (wrote) toast("この教材に記録しました");
     return;
   }
-  if (bookRun) return;
+  if (bookRun && bookRun.bookId !== bookRunId && !bookRun.paused) return;
   if (session) {
     toast("いまの計測を終えてから始めてください");
     return;
   }
-  bookRun = { bookId: bookRunId, startedAt: Date.now() };
+  bookRun = { bookId: bookRunId, startedAt: Date.now(), paused: false };
+  lastVisibleAt = Date.now();
   startBookTicker();
   paintBookRun();
 }
 
 function saveBookRun() {
+  const paused = !!(bookRun && bookRun.paused);
   const wrote = commitBookRun(Date.now());
   closeBookRun();
   renderBookShelf();
-  if (wrote) toast("学習時間を記録しました");
+  if (wrote || paused) toast("学習時間を記録しました");
 }
 
 function requestCloseBookRun(after) {
-  if (bookRun) {
+  if (bookRun && !bookRun.paused && bookRun.startedAt > 0) {
     bookLeaveAction = after || null;
     const sheet = $("book-stop-sheet");
     if (sheet) {
@@ -1391,7 +1432,10 @@ function requestCloseBookRun(after) {
     }
     return;
   }
+  bookRun = null;
+  stopBookTicker();
   closeBookRun();
+  renderBookBadge(Date.now());
   if (after) after();
 }
 
@@ -1414,11 +1458,59 @@ function cancelDiscardBookRun() {
   if (sheet) sheet.hidden = true;
 }
 
+function measurementBusy() {
+  return !!(session || (bookRun && !bookRun.paused && bookRun.startedAt > 0));
+}
+
+function fillTodayEditor() {
+  const nowEl = $("today-edit-now");
+  if (!nowEl || !stateBox.data) return;
+  const today = tokyoToday();
+  const rec = stateBox.data.log[today] || { minutes: 0, carryMs: 0 };
+  const shown = floorStudyMinutes(rec);
+  nowEl.textContent = formatDuration(shown);
+  const hours = $("today-edit-h");
+  const mins = $("today-edit-m");
+  if (hours && document.activeElement !== hours) hours.value = String(Math.floor(shown / 60));
+  if (mins && document.activeElement !== mins) mins.value = String(shown % 60);
+  const saveBtn = $("today-edit-save");
+  const busy = measurementBusy();
+  if (saveBtn) saveBtn.disabled = busy;
+  const hint = $("today-edit-hint");
+  if (hint) {
+    hint.textContent = busy
+      ? "計測中は直せません。終了してから、東京の今日だけを直せます。"
+      : "東京の今日だけを直します。問題数・達成率・教材の登録は消えません。合計を0にすると今日の教材ごとの時間も0になります。合計より教材ごとの時間が多いときだけ、その分を縮めます。";
+  }
+}
+
+function applyTodayMinutes(minutes) {
+  if (measurementBusy()) {
+    toast("計測を終えてから直してください");
+    return;
+  }
+  const data = stateBox.data;
+  const today = tokyoToday();
+  const total = Math.max(0, Math.round(Number(minutes) || 0));
+  setDayStudyMinutes(data, today, total);
+  if (total > 0) {
+    data.studied = true;
+    data.demo = false;
+  }
+  syncStreak(data, today);
+  save(data);
+  fillTodayEditor();
+  fillSettings();
+  renderHome();
+  toast("今日の学習時間を直しました");
+}
+
 function fillSettings() {
   const data = stateBox.data;
   $("exam-fixed").textContent = formatJPDate(computeExamDate(tokyoToday()));
   $("weekly-hours").value = String(data.weeklyGoalHours);
   $("daily-questions").value = String(data.dailyQuestionGoal);
+  fillTodayEditor();
 }
 
 let toastTimer = 0;
@@ -1445,22 +1537,35 @@ function saveSettings() {
 }
 
 function hideStudyChrome() {
-  $("measure-badge").hidden = true;
+  const badge = $("measure-badge");
+  badge.hidden = true;
+  badge.classList.remove("is-paused");
   $("pom-overlay").hidden = true;
 }
 
 function renderStudyChrome(view) {
-  const counting = view.screen === "work" || view.screen === "workDone";
-  $("measure-badge").hidden = !counting;
+  const showPaused = view.screen === "paused";
+  const counting = view.screen === "work" || view.screen === "workDone" || showPaused;
+  const badge = $("measure-badge");
+  badge.hidden = !counting;
+  badge.classList.toggle("is-paused", !!(showPaused || view.paused));
+  const label = $("measure-label");
+  if (label) label.textContent = (showPaused || view.paused) ? "一時停止" : "計測中";
   if (counting) $("measure-clock").textContent = view.clock;
 
   const showOver = view.screen === "workDone";
   const showBreak = view.screen === "break";
   const showAsk = view.screen === "breakDone";
-  $("pom-overlay").hidden = !(showOver || showBreak || showAsk);
+  $("pom-overlay").hidden = !(showOver || showBreak || showAsk || showPaused);
   $("pom-over").hidden = !showOver;
   $("pom-break").hidden = !showBreak;
   $("pom-ask").hidden = !showAsk;
+  const pausedCard = $("pom-paused");
+  if (pausedCard) pausedCard.hidden = !showPaused;
+  if (showPaused) {
+    const clock = $("paused-clock");
+    if (clock) clock.textContent = view.clock;
+  }
   if (showBreak) $("break-time").textContent = view.clock;
   if (showAsk) {
     $("break-over").hidden = !view.breakOver;
@@ -1471,6 +1576,7 @@ function renderStudyChrome(view) {
   if (view.screen !== lastScreen) {
     const messages = {
       work: "計測中 " + view.clock,
+      paused: "一時停止中。計測は止まっています",
       workDone: "終了してください",
       break: "休憩中。勉強計測は停止中",
       breakDone: "次のセットを始めますか？"
@@ -1504,10 +1610,75 @@ function flushSession(now, ending) {
     const minutesAfter = (Number(rec.minutes) || 0) + Math.floor(pending / 60000);
     if (minutesAfter >= 1) materializeDemo(data);
     detached.spans.forEach((pair) => addStudySpan(data, pair[0], pair[1]));
+    session = addCredit(session, detached.spans);
     syncStreak(data, today);
   }
   stateBox.data.activeSession = ending ? null : session;
   save(stateBox.data);
+}
+
+function markParked() {
+  try { sessionStorage.setItem(PARK_KEY, "1"); } catch (err) { /* private mode */ }
+}
+
+function takeParkNotice() {
+  try {
+    if (sessionStorage.getItem(PARK_KEY) !== "1") return false;
+    sessionStorage.removeItem(PARK_KEY);
+    return true;
+  } catch (err) {
+    return false;
+  }
+}
+
+function noteReturned() {
+  const notice = takeParkNotice();
+  if (!backgroundParked && !notice) return;
+  backgroundParked = false;
+  toast("計測を一時停止しました");
+}
+
+/* Late visibility events must not bill the whole absence. A timely hide is within one frame of the last paint. */
+function leaveStamp(now) {
+  const at = typeof now === "number" ? now : Date.now();
+  if (lastVisibleAt && at - lastVisibleAt > AWAY_MS) return lastVisibleAt;
+  return at;
+}
+
+function leaveMeasurement(at) {
+  const now = typeof at === "number" ? at : leaveStamp(Date.now());
+  let changed = false;
+  if (bookRun && !bookRun.paused && bookRun.startedAt > 0) {
+    if (pauseBookRun(now)) changed = true;
+  }
+  if (session && (session.phase === "work" || session.phase === "workDone")) {
+    session = holdSession(session, now);
+    flushSession(now, false);
+    changed = true;
+    renderStudyChrome(presentSession(session, Date.now()));
+  }
+  if (changed) {
+    backgroundParked = true;
+    markParked();
+  }
+  return changed;
+}
+
+function catchAway(now) {
+  if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+    leaveMeasurement(lastVisibleAt || now);
+    return true;
+  }
+  const runningSession = session && (session.phase === "work" || session.phase === "workDone");
+  const runningBook = bookRun && !bookRun.paused && bookRun.startedAt > 0;
+  if (lastVisibleAt && now - lastVisibleAt > AWAY_MS && (runningSession || runningBook)) {
+    leaveMeasurement(lastVisibleAt);
+    lastVisibleAt = now;
+    noteReturned();
+    return true;
+  }
+  lastVisibleAt = now;
+  return false;
 }
 
 function startTicker() {
@@ -1516,6 +1687,7 @@ function startTicker() {
   const frame = () => {
     if (!session) return;
     const now = Date.now();
+    if (catchAway(now)) return;
     const phase = session.phase;
     session = tickSession(session, now);
     if (session.phase !== phase) {
@@ -1523,14 +1695,14 @@ function startTicker() {
       lastFlush = now;
     }
     const view = presentSession(session, now);
-    if (view.nudge >= 1 && view.nudge > session.seenNudge) {
+    if (view.nudge >= 1 && view.nudge > session.seenNudge && session.phase !== "paused") {
       session = { ...session, seenNudge: view.nudge };
       stateBox.data.activeSession = session;
       save(stateBox.data);
       pulse(view.screen === "workDone" ? $("pom-over") : $("pom-ask"));
     }
-    if (sessionShowsTimer(currentView())) renderStudyChrome(view);
-    if (now - lastFlush >= 5000) {
+    if (sessionShowsTimer(currentView()) || session.phase === "paused") renderStudyChrome(view);
+    if ((session.phase === "work" || session.phase === "workDone") && now - lastFlush >= 5000) {
       flushSession(now, false);
       lastFlush = now;
     }
@@ -1613,7 +1785,8 @@ function beginFromConfirm() {
     aiDraft = null;
     aiDirty = false;
   }
-  session = createSession(mode, Date.now());
+  lastVisibleAt = Date.now();
+  session = createSession(mode, lastVisibleAt);
   lastScreen = "";
   stateBox.data.activeSession = session;
   save(stateBox.data);
@@ -1637,6 +1810,69 @@ function closeEndConfirm() {
   $("end-sheet").hidden = true;
 }
 
+function closeDiscardSession() {
+  const sheet = $("discard-session-sheet");
+  if (sheet) sheet.hidden = true;
+}
+
+function openDiscardSession() {
+  if (!session) return;
+  const sheet = $("discard-session-sheet");
+  if (!sheet) return;
+  sheet.hidden = false;
+  $("discard-session-yes").focus();
+}
+
+function discardHeldSession() {
+  if (!session) {
+    closeDiscardSession();
+    return;
+  }
+  const credit = session.creditedMs || {};
+  const had = Object.keys(credit).some((iso) => Number(credit[iso]) > 0);
+  stopTicker();
+  const data = stateBox.data;
+  Object.keys(credit).forEach((iso) => removeStudyMs(data, iso, Number(credit[iso]) || 0));
+  session = null;
+  data.activeSession = null;
+  guideHold = null;
+  syncStreak(data, tokyoToday());
+  save(data);
+  closeDiscardSession();
+  closeEndConfirm();
+  hideStudyChrome();
+  const dock = $("ox-dock");
+  if (dock) dock.hidden = true;
+  document.body.classList.remove("is-guide-ox");
+  navigateTo("home", true);
+  renderHome();
+  toast(had ? "この計測を破棄しました" : "計測をやめました。すでに記録した時間は設定から直せます");
+}
+
+function closeTodayZero() {
+  const sheet = $("today-zero-sheet");
+  if (sheet) sheet.hidden = true;
+}
+
+function saveTodayEdit() {
+  if (measurementBusy()) {
+    toast("計測を終えてから直してください");
+    return;
+  }
+  const hours = clamp(Math.round(Number($("today-edit-h").value) || 0), 0, 99);
+  const mins = clamp(Math.round(Number($("today-edit-m").value) || 0), 0, 59);
+  const total = hours * 60 + mins;
+  if (total === 0) {
+    const sheet = $("today-zero-sheet");
+    if (sheet) {
+      sheet.hidden = false;
+      $("today-zero-yes").focus();
+    }
+    return;
+  }
+  applyTodayMinutes(total);
+}
+
 function finishSession() {
   if (!session) return;
   if (textPanel === "ai" && aiDirty) {
@@ -1646,6 +1882,7 @@ function finishSession() {
   const dest = pendingLeave || (session.mode === "guide" ? "today" : "home");
   pendingLeave = null;
   stopTicker();
+  closeDiscardSession();
   flushSession(Date.now(), true);
   session = null;
   guideHold = null;
@@ -2785,6 +3022,33 @@ function bind() {
     renderStudyChrome(presentSession(session, now));
   });
   $("btn-next-no").addEventListener("click", finishSession);
+  $("btn-resume").addEventListener("click", () => {
+    if (!session || session.phase !== "paused") return;
+    const now = Date.now();
+    lastVisibleAt = now;
+    session = resumeSession(session, now);
+    lastFlush = now;
+    stateBox.data.activeSession = session;
+    save(stateBox.data);
+    backgroundParked = false;
+    renderStudyChrome(presentSession(session, now));
+  });
+  $("btn-paused-end").addEventListener("click", finishSession);
+  $("btn-paused-discard").addEventListener("click", openDiscardSession);
+  $("discard-session-yes").addEventListener("click", discardHeldSession);
+  $("discard-session-no").addEventListener("click", closeDiscardSession);
+  $("discard-session-sheet").addEventListener("click", (event) => {
+    if (event.target === $("discard-session-sheet")) closeDiscardSession();
+  });
+  $("today-edit-save").addEventListener("click", saveTodayEdit);
+  $("today-zero-yes").addEventListener("click", () => {
+    closeTodayZero();
+    applyTodayMinutes(0);
+  });
+  $("today-zero-no").addEventListener("click", closeTodayZero);
+  $("today-zero-sheet").addEventListener("click", (event) => {
+    if (event.target === $("today-zero-sheet")) closeTodayZero();
+  });
 
   $("ai-discard-yes").addEventListener("click", confirmDiscardAi);
   $("ai-discard-no").addEventListener("click", cancelDiscardAi);
@@ -2804,7 +3068,11 @@ function bind() {
     const editor = $("book-sheet");
     const stop = $("book-stop-sheet");
     const unit = $("book-unit-sheet");
-    if (stop && !stop.hidden) cancelDiscardBookRun();
+    const discardTimer = $("discard-session-sheet");
+    const todayZero = $("today-zero-sheet");
+    if (todayZero && !todayZero.hidden) closeTodayZero();
+    else if (discardTimer && !discardTimer.hidden) closeDiscardSession();
+    else if (stop && !stop.hidden) cancelDiscardBookRun();
     else if (unit && !unit.hidden) closeUnitSheet();
     else if (remove && !remove.hidden) closeBookDelete();
     else if (discardSheetOpen()) cancelDiscardAi();
@@ -2912,16 +3180,20 @@ function bind() {
 
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") {
-      if (bookRun) checkpointBookRun(Date.now());
-      if (session) flushSession(Date.now(), false);
+      leaveMeasurement(leaveStamp(Date.now()));
       return;
     }
+    lastVisibleAt = Date.now();
+    noteReturned();
     if (bookRunId) paintBookRun();
-    if (!session) renderHome();
+    if (session) renderStudyChrome(presentSession(session, Date.now()));
+    else renderHome();
   });
   window.addEventListener("pagehide", () => {
-    if (bookRun) checkpointBookRun(Date.now());
-    if (session) flushSession(Date.now(), false);
+    leaveMeasurement(leaveStamp(Date.now()));
+  });
+  document.addEventListener("freeze", () => {
+    leaveMeasurement(leaveStamp(Date.now()));
   });
 }
 
@@ -2938,8 +3210,9 @@ function refreshAfterCloud() {
   if (view === "text" && !editingAi) renderRangeInto($("text-root"), "text");
   if (view === "workbook" && !editingAi) renderRangeInto($("workbook-root"), "workbook");
   if (view === "ox") renderOxDock();
-  if (sessionShowsTimer(view)) renderStudyChrome(presentSession(session, Date.now()));
-  else if (!session) hideStudyChrome();
+  if (session && (sessionShowsTimer(view) || session.phase === "paused")) {
+    renderStudyChrome(presentSession(session, Date.now()));
+  } else if (!session) hideStudyChrome();
   if (bookRunId) paintBookRun();
   else if (bookRun) renderBookBadge(Date.now());
 }
@@ -2949,9 +3222,10 @@ function adoptCloudSession(data) {
   if (next) {
     session = next;
     const now = Date.now();
-    if (session.phase === "paused") session = resumeSession(session, now);
+    if (session.phase === "work" || session.phase === "workDone") session = parkOpenSession(session);
     session = tickSession(session, now);
     data.activeSession = session;
+    if (session.spans && session.spans.length) flushSession(now, false);
     if (!ticker) startTicker();
   } else if (session) {
     session = null;
@@ -3041,18 +3315,24 @@ function boot() {
   });
   bind();
   session = stateBox.data.activeSession;
+  const parkedNotice = takeParkNotice();
   if (session) {
     const now = Date.now();
-    if (session.phase === "paused") session = resumeSession(session, now);
+    const wasOpen = session.phase === "work" || session.phase === "workDone";
+    if (wasOpen) session = parkOpenSession(session);
+    lastVisibleAt = now;
     session = tickSession(session, now);
     flushSession(now, false);
     navigateTo(session.mode === "guide" ? guideSurface() : studyView(session.mode), true);
     armStudyGuard();
     startTicker();
+    if (wasOpen || parkedNotice) toast("計測を一時停止しました");
   } else if (location.hash && location.hash !== "#home") {
     show(currentView());
+    if (parkedNotice) toast("計測を一時停止しました");
   } else {
     navigateTo("home", true);
+    if (parkedNotice) toast("計測を一時停止しました");
   }
   if ("serviceWorker" in navigator) {
     let refreshing = false;

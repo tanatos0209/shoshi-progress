@@ -163,8 +163,64 @@ const ProgressRules = (function () {
     rec.carryMs = total - addMin * 60000;
   }
 
-  /* Split a study span across Tokyo midnights so each calendar day keeps its own minutes. */
-  function addStudySpan(data, startMs, endMs) {
+  function removeStudyMs(data, iso, ms) {
+    if (!(ms > 0)) return;
+    const rec = ensureDay(data, iso);
+    let total = rec.minutes * 60000 + rec.carryMs - ms;
+    if (total < 0) total = 0;
+    rec.minutes = Math.floor(total / 60000);
+    rec.carryMs = total - rec.minutes * 60000;
+    fitBookTime(rec);
+  }
+
+  function bookMsOf(item) {
+    return Math.max(0, Math.round(Number(item && item.minutes) || 0)) * 60000
+      + Math.max(0, Number(item && item.carryMs) || 0);
+  }
+
+  /* Per-book time is a slice of the day total. Shrink it when the day is corrected downward. */
+  function fitBookTime(rec) {
+    if (!rec || !rec.bookTime || typeof rec.bookTime !== "object") return;
+    const cap = Math.max(0, Math.round(Number(rec.minutes) || 0)) * 60000
+      + Math.max(0, Number(rec.carryMs) || 0);
+    const ids = Object.keys(rec.bookTime);
+    let sum = 0;
+    const parts = ids.map((id) => {
+      const ms = bookMsOf(rec.bookTime[id]);
+      sum += ms;
+      return { id: id, ms: ms };
+    });
+    if (sum <= cap) return;
+    if (!(cap > 0)) {
+      delete rec.bookTime;
+      return;
+    }
+    const next = {};
+    let used = 0;
+    parts.forEach((part, index) => {
+      let ms;
+      if (index === parts.length - 1) ms = Math.max(0, cap - used);
+      else ms = Math.min(Math.floor(part.ms * cap / sum), Math.max(0, cap - used));
+      used += ms;
+      if (!(ms > 0)) return;
+      const addMin = Math.floor(ms / 60000);
+      next[part.id] = { minutes: addMin, carryMs: ms - addMin * 60000 };
+    });
+    if (Object.keys(next).length) rec.bookTime = next;
+    else delete rec.bookTime;
+  }
+
+  /* Replace Tokyo-day study minutes. Questions, PCS, and other days stay. */
+  function setDayStudyMinutes(data, iso, minutes) {
+    const rec = ensureDay(data, iso);
+    rec.minutes = Math.max(0, Math.round(Number(minutes) || 0));
+    rec.carryMs = 0;
+    if (rec.sample) delete rec.sample;
+    fitBookTime(rec);
+    return rec;
+  }
+
+  function eachStudySlice(startMs, endMs, fn) {
     if (!(endMs > startMs)) return 0;
     let cursor = startMs;
     let guard = 0;
@@ -173,11 +229,20 @@ const ProgressRules = (function () {
       const boundary = tokyoMidnightMs(addDays(iso, 1));
       const sliceEnd = Math.min(endMs, boundary);
       if (!(sliceEnd > cursor)) break;
-      addStudyMs(data, iso, sliceEnd - cursor);
+      fn(iso, sliceEnd - cursor);
       cursor = sliceEnd;
       guard += 1;
     }
     return endMs - startMs;
+  }
+
+  /* Split a study span across Tokyo midnights so each calendar day keeps its own minutes. */
+  function addStudySpan(data, startMs, endMs) {
+    return eachStudySlice(startMs, endMs, (iso, ms) => addStudyMs(data, iso, ms));
+  }
+
+  function removeStudySpan(data, startMs, endMs) {
+    return eachStudySlice(startMs, endMs, (iso, ms) => removeStudyMs(data, iso, ms));
   }
 
   function bookTimeOf(log, iso, bookId) {
@@ -231,7 +296,9 @@ const ProgressRules = (function () {
       breakEndsAt: 0,
       breakOverStartedAt: 0,
       seenNudge: 0,
-      spans: []
+      spans: [],
+      heldPhase: "",
+      creditedMs: {}
     };
   }
 
@@ -259,21 +326,78 @@ const ProgressRules = (function () {
     return session;
   }
 
+  function closedSpan(session, end) {
+    const start = session && session.runStartedAt;
+    if (!(start > 0) || !(end > start)) return session.spans.slice();
+    return session.spans.concat([[start, end]]);
+  }
+
   function pauseSession(session, now) {
     if (!session || session.phase !== "work") return session;
     const end = now;
+    const elapsed = session.runStartedAt > 0 && end > session.runStartedAt ? end - session.runStartedAt : 0;
     return {
       ...session,
       phase: "paused",
-      setAccumMs: session.setAccumMs + Math.max(0, end - session.runStartedAt),
-      spans: session.spans.concat([[session.runStartedAt, end]]),
+      heldPhase: "work",
+      setAccumMs: session.setAccumMs + elapsed,
+      spans: closedSpan(session, end),
       runStartedAt: 0
+    };
+  }
+
+  /* Freeze work or overtime at `now` and keep that slice to store. Away time after this is not study. */
+  function holdSession(session, now) {
+    if (!session) return session;
+    if (session.phase !== "work" && session.phase !== "workDone") return session;
+    const end = now;
+    const elapsed = session.runStartedAt > 0 && end > session.runStartedAt ? end - session.runStartedAt : 0;
+    return {
+      ...session,
+      phase: "paused",
+      heldPhase: session.phase,
+      setAccumMs: session.setAccumMs + elapsed,
+      spans: closedSpan(session, end),
+      runStartedAt: 0,
+      seenNudge: 0
+    };
+  }
+
+  /* Restore a running session without crediting the wall-clock gap since runStartedAt. */
+  function parkOpenSession(session) {
+    if (!session) return session;
+    if (session.phase !== "work" && session.phase !== "workDone") return session;
+    return {
+      ...session,
+      phase: "paused",
+      heldPhase: session.phase,
+      runStartedAt: 0,
+      seenNudge: 0
     };
   }
 
   function resumeSession(session, now) {
     if (!session || session.phase !== "paused") return session;
-    return { ...session, phase: "work", runStartedAt: now };
+    const done = session.heldPhase === "workDone" || session.setAccumMs >= WORK_MS;
+    return {
+      ...session,
+      phase: done ? "workDone" : "work",
+      heldPhase: "",
+      runStartedAt: now,
+      seenNudge: 0
+    };
+  }
+
+  function addCredit(session, spans) {
+    if (!session) return session;
+    const bag = Object.assign({}, session.creditedMs || {});
+    (spans || []).forEach((pair) => {
+      if (!pair || !(pair[1] > pair[0])) return;
+      eachStudySlice(pair[0], pair[1], (iso, ms) => {
+        bag[iso] = (Number(bag[iso]) || 0) + ms;
+      });
+    });
+    return { ...session, creditedMs: bag };
   }
 
   function startBreak(session, now) {
@@ -356,18 +480,55 @@ const ProgressRules = (function () {
   function presentSession(session, now) {
     const setMs = liveSetMs(session, now);
     const label = ENTRANCES[session.mode] || "";
-    if (session.phase === "work" || session.phase === "paused") {
+    if (session.phase === "paused") {
+      const done = session.heldPhase === "workDone" || setMs >= WORK_MS;
+      if (done) {
+        const over = Math.max(0, setMs - WORK_MS);
+        return {
+          screen: "paused",
+          clock: formatElapsed(setMs),
+          overtime: formatPlus(over),
+          ring: 1,
+          overtimeMode: true,
+          setLabel: "セット " + session.setNo + " / 一時停止中",
+          prompt: "一時停止中",
+          paused: true,
+          heading: "一時停止中",
+          sub: "画面を離れていたので、計測を止めています",
+          breakOver: "",
+          footer: "",
+          nudge: 0,
+          modeLabel: label
+        };
+      }
+      return {
+        screen: "paused",
+        clock: formatClock(Math.max(0, WORK_MS - setMs)),
+        overtime: "",
+        ring: Math.max(0, Math.min(1, setMs / WORK_MS)),
+        overtimeMode: false,
+        setLabel: "セット " + session.setNo + " / 一時停止中",
+        prompt: "一時停止中",
+        paused: true,
+        heading: "一時停止中",
+        sub: "画面を離れていたので、計測を止めています",
+        breakOver: "",
+        footer: "",
+        nudge: 0,
+        modeLabel: label
+      };
+    }
+    if (session.phase === "work") {
       const remaining = Math.max(0, WORK_MS - setMs);
-      const paused = session.phase === "paused";
       return {
         screen: "work",
         clock: formatClock(remaining),
         overtime: "",
         ring: Math.max(0, Math.min(1, setMs / WORK_MS)),
         overtimeMode: false,
-        setLabel: "セット " + session.setNo + " / " + (paused ? "一時停止中" : "勉強中"),
+        setLabel: "セット " + session.setNo + " / 勉強中",
         prompt: "",
-        paused,
+        paused: false,
         heading: "",
         sub: "",
         breakOver: "",
@@ -433,6 +594,18 @@ const ProgressRules = (function () {
     };
   }
 
+  function cleanCredit(raw) {
+    const out = {};
+    if (!raw || typeof raw !== "object") return out;
+    Object.keys(raw).forEach((iso) => {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return;
+      const ms = Number(raw[iso]);
+      if (!(ms > 0) || !isFinite(ms)) return;
+      out[iso] = ms;
+    });
+    return out;
+  }
+
   function sanitizeSession(raw) {
     if (!raw || typeof raw !== "object") return null;
     if (!ENTRANCES[raw.mode]) return null;
@@ -450,7 +623,9 @@ const ProgressRules = (function () {
       breakEndsAt: Number(raw.breakEndsAt) || 0,
       breakOverStartedAt: Number(raw.breakOverStartedAt) || 0,
       seenNudge: Math.max(0, Math.round(Number(raw.seenNudge) || 0)),
-      spans
+      spans,
+      heldPhase: raw.heldPhase === "workDone" ? "workDone" : (raw.heldPhase === "work" ? "work" : ""),
+      creditedMs: cleanCredit(raw.creditedMs)
     };
     if ((session.phase === "work" || session.phase === "workDone") && !(session.runStartedAt > 0)) {
       return null;
@@ -484,6 +659,9 @@ const ProgressRules = (function () {
     tokyoMidnightMs,
     addStudyMs,
     addStudySpan,
+    removeStudyMs,
+    removeStudySpan,
+    setDayStudyMinutes,
     bookTimeOf,
     addBookStudyMs,
     addBookStudySpan,
@@ -491,7 +669,10 @@ const ProgressRules = (function () {
     liveSetMs,
     tickSession,
     pauseSession,
+    holdSession,
+    parkOpenSession,
     resumeSession,
+    addCredit,
     startBreak,
     confirmNextSet,
     detachSpans,

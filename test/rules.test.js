@@ -219,6 +219,113 @@ test("clock helpers", () => {
   assert.equal(R.formatElapsed((25 * 60 + 12) * 1000), "25:12");
 });
 
+test("leaving the app freezes study and does not bill the absence", () => {
+  const t0 = Date.UTC(2026, 10, 2, 1, 0, 0);
+  let s = R.createSession("notes", t0);
+  s = R.holdSession(s, t0 + 5 * 60 * 1000);
+  assert.equal(s.phase, "paused");
+  assert.equal(s.heldPhase, "work");
+  assert.equal(s.spans.length, 1);
+  assert.equal(s.spans[0][1] - s.spans[0][0], 5 * 60 * 1000);
+  const later = R.detachSpans(s, t0 + 3 * 60 * 60 * 1000);
+  assert.equal(later.spans.length, 1);
+  assert.equal(later.spans[0][1] - later.spans[0][0], 5 * 60 * 1000);
+  assert.equal(R.liveSetMs(later.session, t0 + 8 * 60 * 60 * 1000), 5 * 60 * 1000);
+  assert.equal(R.holdSession(s, t0 + 9 * 60 * 60 * 1000).setAccumMs, s.setAccumMs);
+
+  let open = R.createSession("text", t0);
+  const flushed = R.detachSpans(open, t0 + 10 * 60 * 1000);
+  open = flushed.session;
+  const parked = R.parkOpenSession(open);
+  assert.equal(parked.phase, "paused");
+  assert.equal(parked.setAccumMs, 10 * 60 * 1000);
+  const dropped = R.detachSpans(parked, t0 + 6 * 60 * 60 * 1000);
+  assert.equal(dropped.spans.length, 0);
+
+  let done = R.createSession("speed", t0);
+  done = R.tickSession(done, t0 + R.WORK_MS + 60 * 1000);
+  assert.equal(done.phase, "workDone");
+  const held = R.holdSession(done, t0 + R.WORK_MS + 60 * 1000);
+  assert.equal(held.heldPhase, "workDone");
+  assert.equal(held.spans[0][1] - held.spans[0][0], R.WORK_MS + 60 * 1000);
+  const away = t0 + R.WORK_MS + 4 * 60 * 60 * 1000;
+  assert.equal(R.detachSpans(held, away).spans.length, 1);
+  const back = R.resumeSession(held, away);
+  assert.equal(back.phase, "workDone");
+  assert.equal(R.liveSetMs(back, back.runStartedAt), R.WORK_MS + 60 * 1000);
+  const resumedSlice = R.detachSpans(back, back.runStartedAt + 1000);
+  const fresh = resumedSlice.spans[resumedSlice.spans.length - 1];
+  assert.equal(fresh[1] - fresh[0], 1000);
+  assert.ok(resumedSlice.spans.every((pair) => pair[1] - pair[0] < 30 * 60 * 1000));
+  assert.equal(R.presentSession(held, away).screen, "paused");
+  assert.equal(R.presentSession(held, away).paused, true);
+});
+
+test("credited study can be removed without touching other days or going negative", () => {
+  const data = { log: { "2026-10-31": { minutes: 40, questions: 2 } } };
+  const start = R.tokyoMidnightMs("2026-11-02") - 30 * 1000;
+  const end = R.tokyoMidnightMs("2026-11-02") + 90 * 1000;
+  R.addStudySpan(data, start, end);
+  let session = R.addCredit(R.createSession("ox", start), [[start, end]]);
+  assert.equal(session.creditedMs["2026-11-01"], 30 * 1000);
+  assert.equal(session.creditedMs["2026-11-02"], 90 * 1000);
+  R.removeStudySpan(data, start, end);
+  assert.equal(data.log["2026-11-01"].minutes, 0);
+  assert.equal(data.log["2026-11-01"].carryMs, 0);
+  assert.equal(data.log["2026-11-02"].minutes, 0);
+  assert.equal(data.log["2026-11-02"].carryMs, 0);
+  assert.equal(data.log["2026-10-31"].minutes, 40);
+  R.removeStudyMs(data, "2026-11-02", 5 * 60000);
+  assert.equal(data.log["2026-11-02"].minutes, 0);
+  assert.equal(data.log["2026-11-02"].carryMs, 0);
+});
+
+test("correcting one Tokyo day keeps questions and shrinks only excess book time", () => {
+  const data = {
+    log: {
+      "2026-11-01": { minutes: 40, questions: 7 },
+      "2026-11-02": {
+        minutes: 26,
+        carryMs: 40000,
+        questions: 3,
+        pcs: { date: "2026-11-02", score: 10 },
+        bookTime: {
+          vm: { minutes: 20, carryMs: 0 },
+          ox: { minutes: 6, carryMs: 0 }
+        }
+      }
+    }
+  };
+  R.setDayStudyMinutes(data, "2026-11-02", 0);
+  assert.equal(data.log["2026-11-02"].minutes, 0);
+  assert.equal(data.log["2026-11-02"].carryMs, 0);
+  assert.equal(data.log["2026-11-02"].questions, 3);
+  assert.equal(data.log["2026-11-02"].bookTime, undefined);
+  assert.equal(data.log["2026-11-02"].pcs.score, 10);
+  assert.equal(data.log["2026-11-01"].minutes, 40);
+  assert.equal(data.log["2026-11-01"].questions, 7);
+
+  data.log["2026-11-02"].minutes = 26;
+  data.log["2026-11-02"].bookTime = {
+    vm: { minutes: 20, carryMs: 0 },
+    ox: { minutes: 6, carryMs: 0 }
+  };
+  R.setDayStudyMinutes(data, "2026-11-02", 10);
+  const bag = data.log["2026-11-02"].bookTime;
+  const sum = ["vm", "ox"].reduce((total, id) => {
+    return total + bag[id].minutes * 60000 + bag[id].carryMs;
+  }, 0);
+  assert.equal(data.log["2026-11-02"].minutes, 10);
+  assert.equal(data.log["2026-11-02"].carryMs, 0);
+  assert.equal(sum, 10 * 60000);
+  assert.ok(bag.vm.minutes * 60000 + bag.vm.carryMs < 20 * 60000);
+  assert.equal(data.log["2026-11-02"].questions, 3);
+
+  R.setDayStudyMinutes(data, "2026-11-02", 15);
+  assert.equal(data.log["2026-11-02"].bookTime.vm.minutes, bag.vm.minutes);
+  assert.equal(data.log["2026-11-02"].bookTime.vm.carryMs, bag.vm.carryMs);
+});
+
 test("sanitizeSession rejects a broken resume payload", () => {
   assert.equal(R.sanitizeSession(null), null);
   assert.equal(R.sanitizeSession({ mode: "notes", phase: "work", runStartedAt: 0 }), null);
@@ -228,8 +335,14 @@ test("sanitizeSession rejects a broken resume payload", () => {
     setNo: 2,
     setAccumMs: 1000,
     runStartedAt: 0,
+    heldPhase: "workDone",
+    creditedMs: { "2026-11-02": 1500, bad: 10, "2026-11-03": 0 },
     spans: [[1, 2], [5, 4]]
   });
   assert.equal(ok.mode, "ox");
   assert.equal(ok.spans.length, 1);
+  assert.equal(ok.heldPhase, "workDone");
+  assert.equal(ok.creditedMs["2026-11-02"], 1500);
+  assert.equal(ok.creditedMs.bad, undefined);
+  assert.equal(ok.creditedMs["2026-11-03"], undefined);
 });

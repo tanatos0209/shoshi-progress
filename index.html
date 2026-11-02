@@ -17,7 +17,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&display=swap" rel="stylesheet"/>
-<link rel="stylesheet" href="css/app.css?v=17"/>
+<link rel="stylesheet" href="css/app.css?v=18"/>
 <style>html,body{background:#03150f}</style>
 </head>
 <body>
@@ -256,6 +256,16 @@
         <button type="button" class="btn-quiet" id="sync-claim" hidden>このアカウントに、この端末の記録を保存</button>
         <button type="button" class="btn-quiet" id="sync-sign-out" hidden>ログアウト</button>
       </section>
+      <section class="card" aria-label="今日の学習時間">
+        <h2>今日の学習時間</h2>
+        <p class="exam-fixed" id="today-edit-now">0時間0分</p>
+        <div class="today-edit-row">
+          <label>時間<input id="today-edit-h" type="number" inputmode="numeric" min="0" max="99" step="1" value="0"/></label>
+          <label>分<input id="today-edit-m" type="number" inputmode="numeric" min="0" max="59" step="1" value="0"/></label>
+        </div>
+        <button type="button" class="btn-gold" id="today-edit-save">この時間に直す</button>
+        <p class="hint" id="today-edit-hint">東京の今日だけを直します。問題数・達成率・教材の登録は消えません。合計を0にすると今日の教材ごとの時間も0になります。合計より教材ごとの時間が多いときだけ、その分を縮めます。</p>
+      </section>
       <section class="card">
         <div class="field">
           <span class="block-label" id="exam-fixed-label">試験日</span>
@@ -289,7 +299,7 @@
       <button type="button" class="tbtn tbtn-ghost" data-act="stop-study">いったん終了</button>
     </div>
   </div>
-  <p id="measure-badge" class="measure-badge" hidden><span>計測中</span> <b id="measure-clock">25:00</b></p>
+  <p id="measure-badge" class="measure-badge" hidden><span id="measure-label">計測中</span> <b id="measure-clock">25:00</b></p>
   <div id="pom-overlay" class="pom-overlay" hidden>
     <div id="pom-over" class="pom-card" hidden>
       <p id="work-prompt" class="pom-prompt">終了してください</p>
@@ -330,6 +340,22 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M8 5v14l12-7z"/></svg>
         <span id="ask-foot-label">再開すると同じセット（テキストまとめ）を続行</span>
       </p>
+    </div>
+    <div id="pom-paused" class="pom-card" hidden>
+      <p class="pom-prompt">一時停止中</p>
+      <p id="paused-clock" class="break-time">00:00</p>
+      <p class="break-note">画面を離れていたので、計測を止めています。</p>
+      <div class="timer-actions">
+        <button type="button" id="btn-resume" class="tbtn tbtn-break">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M8 5v14l12-7z"/></svg>
+          <span>再開</span>
+        </button>
+        <button type="button" id="btn-paused-end" class="tbtn tbtn-end">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" d="M5 12.5 9.2 17 19 7"/></svg>
+          <span>終了</span>
+        </button>
+      </div>
+      <button type="button" id="btn-paused-discard" class="tbtn tbtn-ghost tbtn-wide">この計測を破棄</button>
     </div>
   </div>
   <p id="timer-live" class="sr-only" aria-live="polite"></p>
@@ -465,6 +491,7 @@
     </header>
     <div id="book-run-cover" class="book-run-cover"></div>
     <button type="button" id="book-run-toggle" class="btn-gold book-run-toggle" aria-pressed="false">スタート</button>
+    <p id="book-run-status" class="book-run-status" hidden>一時停止中です。スタートで再開します。離れていた時間は足していません。</p>
     <div class="book-gauge">
       <div class="book-gauge-labels"><span>現在</span><span>全体</span></div>
       <p id="book-run-fraction" class="book-fraction">P.0 / P.0</p>
@@ -486,6 +513,26 @@
     </div>
   </div>
 </div>
+<div id="discard-session-sheet" class="sheet" hidden>
+  <div class="sheet-card" role="dialog" aria-modal="true" aria-labelledby="discard-session-title">
+    <h2 id="discard-session-title">この計測を破棄しますか？</h2>
+    <p class="sheet-mode">この計測で足した学習時間を、今日の記録から戻します。</p>
+    <div class="sheet-actions">
+      <button type="button" id="discard-session-yes" class="tbtn tbtn-end">破棄する</button>
+      <button type="button" id="discard-session-no" class="tbtn tbtn-ghost">戻る</button>
+    </div>
+  </div>
+</div>
+<div id="today-zero-sheet" class="sheet" hidden>
+  <div class="sheet-card" role="dialog" aria-modal="true" aria-labelledby="today-zero-title">
+    <h2 id="today-zero-title">今日の学習時間を0にしますか？</h2>
+    <p class="sheet-mode">問題数・達成率・教材の登録は残します。今日の教材ごとの時間も0になります。</p>
+    <div class="sheet-actions">
+      <button type="button" id="today-zero-yes" class="tbtn tbtn-end">0にする</button>
+      <button type="button" id="today-zero-no" class="tbtn tbtn-ghost">戻る</button>
+    </div>
+  </div>
+</div>
 <div id="end-sheet" class="sheet" hidden>
   <div class="sheet-card sheet-neon" role="dialog" aria-modal="true" aria-labelledby="end-title">
     <h2 id="end-title" tabindex="-1">終了して記録しますか？</h2>
@@ -495,10 +542,10 @@
     </div>
   </div>
 </div>
-<script src="js/firebase-config.js?v=17"></script>
-<script src="js/rules.js?v=17"></script>
-<script src="js/pcs.js?v=17"></script>
-<script src="js/sync.js?v=17"></script>
-<script src="js/app.js?v=17"></script>
+<script src="js/firebase-config.js?v=18"></script>
+<script src="js/rules.js?v=18"></script>
+<script src="js/pcs.js?v=18"></script>
+<script src="js/sync.js?v=18"></script>
+<script src="js/app.js?v=18"></script>
 </body>
 </html>
